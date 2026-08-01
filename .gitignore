@@ -1,0 +1,10 @@
+# Config locale Claude Code (permissions, etc.)
+.claude/
+
+# Fichiers système
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Dépendances éventuelles
+node_modules/

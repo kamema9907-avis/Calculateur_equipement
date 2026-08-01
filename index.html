@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Albion — Calculateur d'équipement</title>
+<style>
+  :root{
+    /* Theme commun aux projets Albion */
+    --bg:#121212; --panel:#1e1e1e; --panel2:#252525; --line:#333; --line2:#444;
+    --gold:#f3a918; --txt:#e0e0e0; --muted:#8a8a8a; --blue:#4aa3df;
+
+    /* Etat (bon / alerte / critique). Toujours accompagne d'un signe ou d'un mot :
+       la couleur ne porte jamais l'information seule. */
+    --bon:#0ca30c; --alerte:#fab219; --critique:#d03b3b;
+
+    /* Identite des canaux de vente. Paire validee pour le daltonisme
+       (deltaE 26,8 en protanopie) et toujours doublee du libelle. */
+    --canal-bm:#3987e5; --canal-ville:#d95926;
+
+    /* Rampe sequentielle de la carte de reperage : une seule teinte, l'or du
+       projet, 6 marches d'ecart de clarte >= 0,06, marche la plus sombre a
+       2,96:1 sur le panneau. Validee, pas choisie a l'oeil. */
+    --r1:#8a5f0c; --r2:#a8760f; --r3:#c58f13; --r4:#e0a81c; --r5:#f0bd4a; --r6:#f9d989;
+    --r0:#242422;              /* case sans opportunite : recede vers le fond */
+
+    --grille:#2c2c2a; --axe:#383835;
+  }
+  *{box-sizing:border-box}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);
+    margin:0;padding:14px;font-size:14px}
+  h1{color:var(--gold);font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px}
+  a{color:var(--blue)}
+  button{background:var(--gold);color:#121212;border:none;padding:9px 14px;border-radius:6px;
+    font-weight:700;cursor:pointer;font-size:13px}
+  button.ghost{background:transparent;color:var(--gold);border:1px solid var(--gold)}
+  button.plat{background:var(--panel2);color:var(--txt);border:1px solid var(--line2);font-weight:400}
+  button:disabled{opacity:.45;cursor:default}
+  select,input[type=number],input[type=text]{background:var(--bg);border:1px solid var(--line2);
+    color:var(--txt);padding:7px 8px;border-radius:6px;font-size:13px;width:100%}
+  label{cursor:pointer}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* ---- Onglets ---- */
+  .tabs{display:flex;gap:4px;margin:14px 0;border-bottom:2px solid var(--line);flex-wrap:wrap}
+  .tab{padding:10px 18px;cursor:pointer;font-size:14px;font-weight:600;color:var(--muted);
+    border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;margin-bottom:-2px}
+  .tab:hover{color:var(--txt)}
+  .tab.on{color:var(--gold);background:var(--panel);border-color:var(--line);border-bottom:2px solid var(--panel)}
+
+  /* ---- Bandeaux ---- */
+  .bandeau{border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:13px;line-height:1.5}
+  .bandeau.avert{background:rgba(250,178,25,.10);border:1px solid #5a4527;color:#ffd98a}
+  .bandeau.err{background:rgba(208,59,59,.12);border:1px solid #5c2b2b;color:#ffb0b0}
+  .bandeau b{color:#fff}
+  .bandeau a{cursor:pointer;text-decoration:underline}
+
+  /* ---- Filtres ---- */
+  .filtres{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:12px 14px;margin-bottom:12px;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  .grille-filtres{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 18px}
+  .champ{display:flex;flex-direction:column;gap:5px;min-width:0}
+  .champ>span.lab{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700}
+  .raccourci{font-size:10px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--blue);
+    margin-left:6px;cursor:pointer}
+  .raccourci:hover{text-decoration:underline}
+  .cases{display:flex;flex-wrap:wrap;gap:5px 12px}
+  .cases label{display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
+  .pleine{grid-column:1 / -1}
+  .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px;
+    padding-top:12px;border-top:1px solid var(--line)}
+  .statut{font-size:12px;color:var(--muted)}
+  .barre-progres{height:4px;background:var(--panel2);border-radius:2px;overflow:hidden;flex:1;min-width:120px;max-width:260px}
+  .barre-progres>i{display:block;height:100%;background:var(--gold);transition:width .2s}
+
+  /* ---- Tuiles de synthese ---- */
+  .tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .tuile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .tuile .k{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700}
+  .tuile .v{font-size:21px;font-weight:700;margin-top:3px}
+  .tuile .n{font-size:11px;color:var(--muted);margin-top:2px}
+
+  /* ---- Carte de reperage ---- */
+  .cartes{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:12px}
+  .carte{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .carte>h3{margin:0;padding:10px 13px;font-size:13px;color:var(--gold);background:var(--panel2);
+    border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+  .carte>h3 .n{color:var(--muted);font-weight:400;font-size:11px}
+  .carte-corps{padding:10px 13px 13px;overflow-x:auto}
+  table.hm{border-collapse:separate;border-spacing:2px;margin:0 auto}
+  table.hm th{font-size:10px;color:var(--muted);font-weight:600;padding:2px 4px;text-align:center;
+    text-transform:uppercase;letter-spacing:.4px}
+  table.hm th.rowh{text-align:right;padding-right:6px}
+  table.hm td{padding:0}
+  .cell{width:52px;height:34px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;cursor:pointer;color:#1a1a19;border:1px solid transparent;
+    font-variant-numeric:tabular-nums}
+  .cell.vide{background:var(--r0);color:#5a5a58;cursor:default;font-weight:400}
+  .cell:not(.vide):hover{border-color:#fff}
+  .cell.selection{border-color:#fff;box-shadow:0 0 0 2px var(--panel)}
+  .legende{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);margin-top:9px;
+    flex-wrap:wrap;justify-content:center}
+  .legende .pas{width:26px;height:11px;border-radius:2px}
+
+  /* ---- Tableau ---- */
+  .tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+  table.tb{width:100%;border-collapse:collapse}
+  table.tb thead th{position:sticky;top:0;z-index:5;background:var(--panel2);color:var(--gold);
+    text-align:right;padding:10px 11px;font-size:11px;border-bottom:2px solid var(--line);
+    cursor:pointer;white-space:nowrap;text-transform:uppercase;letter-spacing:.4px}
+  table.tb thead th.g{text-align:left}
+  table.tb thead th .fl{opacity:.55;font-size:9px;margin-left:3px}
+  table.tb tbody td{padding:8px 11px;border-bottom:1px solid var(--line);text-align:right;
+    vertical-align:middle;font-variant-numeric:tabular-nums}
+  table.tb tbody td.g{text-align:left;font-variant-numeric:normal}
+  table.tb tbody tr{cursor:pointer}
+  table.tb tbody tr:hover{background:#242424}
+  table.tb tbody tr.on{background:#2a2620;box-shadow:inset 3px 0 0 var(--gold)}
+  .objet{display:flex;align-items:center;gap:9px}
+  .objet img{width:34px;height:34px;background:var(--panel2);border-radius:5px;border:1px solid var(--line);flex:0 0 auto}
+  .objet .nom{font-weight:600;line-height:1.15}
+  .objet .id{font-size:10px;color:var(--muted)}
+  .pos{color:var(--bon);font-weight:700}
+  .neg{color:var(--critique);font-weight:700}
+  .na{color:var(--muted)}
+  .pastille{display:inline-block;font-size:10px;padding:1px 6px;border-radius:8px;
+    border:1px solid var(--line2);color:var(--muted);white-space:nowrap}
+  .pastille.t{background:#2a2a2a;color:#cfcfcf;font-weight:700}
+  .canal{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 7px;border-radius:8px;
+    border:1px solid;white-space:nowrap;font-weight:600}
+  .canal.bm{color:var(--canal-bm);border-color:#25507f;background:rgba(57,135,229,.10)}
+  .canal.ville{color:var(--canal-ville);border-color:#7a3418;background:rgba(217,89,38,.10)}
+  .avert-inline{color:var(--alerte);font-size:11px;margin-left:4px}
+  .vide-msg{padding:40px 20px;text-align:center;color:var(--muted);line-height:1.6}
+  .pied{margin-top:10px;display:flex;gap:12px;align-items:center;justify-content:center;
+    font-size:12px;color:var(--muted);flex-wrap:wrap}
+
+  /* ---- Panneau de detail ---- */
+  .voile{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--panel);
+    border-left:1px solid var(--line);z-index:41;overflow-y:auto;box-shadow:-8px 0 30px rgba(0,0,0,.5)}
+  .drawer-tete{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--line);
+    padding:12px 14px;display:flex;gap:11px;align-items:flex-start;z-index:2}
+  .drawer-tete img{width:46px;height:46px;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
+  .drawer-tete .x{margin-left:auto;background:none;color:var(--muted);border:none;font-size:22px;
+    cursor:pointer;padding:0 4px;line-height:1}
+  .drawer-corps{padding:13px 14px 40px}
+  .bloc{margin-bottom:16px}
+  .bloc>h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid #262626;font-size:13px}
+  .kv:last-child{border-bottom:none}
+  .kv b{font-variant-numeric:tabular-nums}
+  .arbre{font-size:13px}
+  .noeud{border-left:2px solid var(--line2);padding-left:10px;margin-left:3px}
+  .noeud-tete{display:flex;gap:8px;align-items:center;padding:5px 0;flex-wrap:wrap}
+  .noeud-tete .q{color:var(--muted);font-size:11px}
+  .noeud-tete .c{margin-left:auto;font-variant-numeric:tabular-nums}
+  .via{font-size:10px;padding:1px 6px;border-radius:6px;border:1px solid var(--line2);color:var(--muted);cursor:pointer}
+  .via.on{border-color:var(--bon);color:#bfe6c0;background:rgba(12,163,12,.10)}
+  .via.forcee{border-style:dashed;border-color:var(--gold);color:var(--gold)}
+  .marge-serree{color:var(--alerte);font-size:10px}
+  .canaux-liste{display:flex;flex-direction:column;gap:5px}
+  .canal-ligne{display:flex;gap:9px;align-items:center;padding:6px 8px;border-radius:6px;
+    background:var(--panel2);font-size:12px}
+  .canal-ligne.gagnant{box-shadow:inset 2px 0 0 var(--bon)}
+  .canal-ligne .m{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:700}
+
+  /* ---- Reglages ---- */
+  .reglages{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+  table.rg{width:100%;border-collapse:collapse;font-size:13px}
+  table.rg th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
+  table.rg td{padding:5px 8px;border-bottom:1px solid #262626}
+  table.rg td select{padding:5px 6px;font-size:12px}
+  .aconf{background:none;border:1px solid var(--alerte);color:var(--alerte);font-size:10px;
+    padding:2px 7px;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap}
+  .conf{border-color:var(--bon);color:var(--bon)}
+  .parts-q{display:grid;grid-template-columns:1fr 82px;gap:6px 10px;align-items:center;font-size:13px}
+
+  /* ---- Infobulle ---- */
+  .bulle{position:fixed;z-index:60;background:#0b0b0b;border:1px solid var(--line2);border-radius:6px;
+    padding:7px 10px;font-size:12px;pointer-events:none;max-width:280px;line-height:1.45;
+    box-shadow:0 6px 20px rgba(0,0,0,.6)}
+  .bulle .t{color:var(--gold);font-weight:700;display:block;margin-bottom:2px}
+  .bulle .m{color:var(--muted);font-size:11px}
+
+  /* ---- Responsive : tables -> cartes ---- */
+  @media(max-width:760px){
+    body{padding:10px}
+    table.tb thead{display:none}
+    table.tb tbody tr{display:grid;grid-template-columns:1fr auto;gap:3px 10px;padding:10px 12px;
+      border-bottom:1px solid var(--line)}
+    table.tb tbody td{border:none;padding:2px 0}
+    table.tb tbody td.g{grid-column:1 / -1}
+    table.tb tbody td[data-lab]::before{content:attr(data-lab);float:left;color:var(--muted);
+      font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-right:8px;font-weight:600}
+    .drawer{width:100%}
+    .cell{width:44px;height:31px;font-size:10px}
+  }
+</style>
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <h1>⚒️ Albion — Calculateur d'équipement</h1>
+  <div class="sub">Serveur <b>Europe</b> · prix <b>albion-online-data</b> · {{ fmt(nbRecettes) }} recettes au catalogue</div>
+
+  <!-- ============ Bandeaux ============ -->
+  <div v-if="erreur" class="bandeau err" style="margin-top:12px">{{ erreur }}</div>
+
+  <div v-if="!pret && !erreur" class="bandeau avert" style="margin-top:12px">
+    ⏳ Chargement du catalogue…
+  </div>
+
+  <div v-if="prixCharges && !histoCharges" class="bandeau avert" style="margin-top:12px">
+    📋 <b>Marges non corrigées.</b> Le balayage ne connaît que les prix <i>demandés</i>.
+    Un ordre isolé et fantaisiste passe pour une occasion en or, surtout dans une ville
+    où l'objet ne s'échange jamais.
+    <a @click="analyseFine()">Lancer l'analyse fine</a> pour confronter chaque prix
+    aux transactions réellement conclues et écarter les marchés morts.
+  </div>
+
+  <div v-if="nbNonVerif > 0" class="bandeau avert" style="margin-top:12px">
+    ⚠ <b>{{ nbNonVerif }} bonus de ville</b> ne sont pas confirmés. Ils viennent de mes suppositions,
+    pas des fichiers du jeu, et ils changent le coût de fabrication.
+    <a @click="onglet='reglages'">Les vérifier dans Réglages →</a>
+  </div>
+
+  <!-- ============ Onglets ============ -->
+  <div class="tabs">
+    <div class="tab" :class="{on:onglet==='reperage'}" @click="onglet='reperage'">🗺️ Repérage</div>
+    <div class="tab" :class="{on:onglet==='tableau'}" @click="onglet='tableau'">📊 Tableau</div>
+    <div class="tab" :class="{on:onglet==='reglages'}" @click="onglet='reglages'">⚙️ Réglages</div>
+  </div>
+
+  <!-- ============ Filtres (communs aux vues Repérage et Tableau) ============ -->
+  <div class="filtres" v-if="onglet!=='reglages'">
+    <div class="grille-filtres">
+
+      <div class="champ pleine">
+        <span class="lab">Catégories
+          <a class="raccourci" @click="f.categories=CATEGORIES.map(c=>c.cle)">toutes</a>
+          <a class="raccourci" @click="f.categories=[]">aucune</a></span>
+        <div class="cases">
+          <label v-for="c in CATEGORIES" :key="c.cle">
+            <input type="checkbox" :value="c.cle" v-model="f.categories"> {{ c.icone }} {{ c.label }}
+          </label>
+        </div>
+      </div>
+
+      <div class="champ">
+        <span class="lab">Niveaux
+          <a class="raccourci" @click="f.tiers=[4,5,6,7,8]">4-8</a>
+          <a class="raccourci" @click="f.tiers=[...TIERS]">tous</a></span>
+        <div class="cases">
+          <label v-for="t in TIERS" :key="t"><input type="checkbox" :value="t" v-model="f.tiers"> T{{ t }}</label>
+        </div>
+      </div>
+
+      <div class="champ">
+        <span class="lab">Enchantements
+          <a class="raccourci" @click="f.ench=[...ENCHANTEMENTS]">tous</a>
+          <a class="raccourci" @click="f.ench=[0]">.0</a></span>
+        <div class="cases">
+          <label v-for="e in ENCHANTEMENTS" :key="e"><input type="checkbox" :value="e" v-model="f.ench"> .{{ e }}</label>
+        </div>
+      </div>
+
+      <div class="champ">
+        <span class="lab">Ligne d'armure</span>
+        <div class="cases">
+          <label v-for="l in LIGNES" :key="l.cle"><input type="checkbox" :value="l.cle" v-model="f.lignes"> {{ l.label }}</label>
+        </div>
+      </div>
+
+      <div class="champ">
+        <span class="lab">Lignée</span>
+        <div class="cases">
+          <label v-for="l in LIGNEES" :key="l.cle"><input type="checkbox" :value="l.cle" v-model="f.lignees"> {{ l.label }}</label>
+        </div>
+      </div>
+
+      <div class="champ pleine">
+        <span class="lab">Villes où j'accepte d'acheter les ressources
+          <a class="raccourci" @click="f.villesAchat=[...VILLES]">toutes</a></span>
+        <div class="cases">
+          <label v-for="v in VILLES" :key="v"><input type="checkbox" :value="v" v-model="f.villesAchat"> {{ v }}</label>
+        </div>
+      </div>
+
+      <div class="champ pleine">
+        <span class="lab">Villes où j'accepte de vendre <span style="text-transform:none;font-weight:400">(le Black Market est toujours considéré)</span>
+          <a class="raccourci" @click="f.villesVente=[...VILLES]">toutes</a></span>
+        <div class="cases">
+          <label v-for="v in VILLES" :key="v"><input type="checkbox" :value="v" v-model="f.villesVente"> {{ v }}</label>
+        </div>
+      </div>
+
+      <div class="champ">
+        <span class="lab">Recherche par nom</span>
+        <input type="text" v-model="f.recherche" placeholder="ex : bottes, arc, capuche…">
+      </div>
+
+      <div class="champ">
+        <span class="lab">Fraîcheur maximale du prix</span>
+        <select v-model.number="f.maxAgeH">
+          <option :value="0">aucun filtre</option>
+          <option :value="6">6 heures</option>
+          <option :value="12">12 heures</option>
+          <option :value="24">24 heures</option>
+          <option :value="72">3 jours</option>
+        </select>
+      </div>
+
+      <div class="champ">
+        <span class="lab">Marge minimale affichée (%)</span>
+        <input type="number" v-model.number="f.margeMin" min="0" step="5">
+      </div>
+
+      <div class="champ">
+        <span class="lab">Volume quotidien minimal
+          <span style="text-transform:none;font-weight:400">(après analyse fine)</span></span>
+        <input type="number" v-model.number="f.volumeMin" min="0" step="1">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button @click="balayer(false)" :disabled="chargement || !pret">
+        {{ prixCharges ? 'Rafraîchir les prix' : 'Balayer le marché' }}
+      </button>
+      <button class="ghost" @click="analyseFine()" :disabled="chargement || !prixCharges">
+        Analyse fine des {{ f.topAnalyse }} meilleurs
+      </button>
+      <div v-if="chargement" class="barre-progres"><i :style="{width: progres+'%'}"></i></div>
+      <span class="statut">{{ statut }}</span>
+      <button v-if="!chargement && prixCharges" class="plat" @click="balayer(true)">Ignorer le cache</button>
+    </div>
+    <div class="statut" style="margin-top:8px" v-if="!prixCharges && !chargement">
+      Le balayage charge les prix en qualité Normale sur tout le périmètre filtré
+      ({{ fmt(estimation.items) }} objets, ~{{ estimation.requetes }} requêtes, ~{{ estimation.secondes }} s).
+      L'analyse fine ajoute ensuite les 5 qualités et l'historique des transactions,
+      mais seulement sur les meilleurs candidats.
+    </div>
+  </div>
+
+  <!-- ============ Tuiles ============ -->
+  <div class="tuiles" v-if="onglet!=='reglages' && prixCharges">
+    <div class="tuile">
+      <div class="k">Opportunités</div>
+      <div class="v">{{ fmt(lignes.length) }}</div>
+      <div class="n">sur {{ fmt(perimetre.length) }} recettes filtrées</div>
+    </div>
+    <div class="tuile">
+      <div class="k">Meilleure marge</div>
+      <div class="v pos">{{ lignes.length ? fmtPct(lignes[0].marge) : '—' }}</div>
+      <div class="n">{{ lignes.length ? nom(lignes[0].id) : '—' }}</div>
+    </div>
+    <div class="tuile">
+      <div class="k">Meilleur profit unitaire</div>
+      <div class="v pos">{{ meilleurProfit ? fmtM(meilleurProfit.profit) : '—' }}</div>
+      <div class="n">{{ meilleurProfit ? nom(meilleurProfit.id) : '—' }}</div>
+    </div>
+    <div class="tuile">
+      <div class="k">Vente immédiate gagnante</div>
+      <div class="v">{{ fmtPct(partInstant) }}</div>
+      <div class="n">des opportunités, dont {{ fmt(nbBlackMarket) }} au Black Market</div>
+    </div>
+    <div class="tuile" v-if="histoCharges">
+      <div class="k">Prix corrigés</div>
+      <div class="v" :class="{neg:nbAberrants>0}">{{ fmt(nbAberrants) }}</div>
+      <div class="n">ordres au-dessus du prix réellement transigé</div>
+    </div>
+  </div>
+
+  <!-- ============================== REPERAGE ============================== -->
+  <template v-if="onglet==='reperage'">
+    <div v-if="!prixCharges" class="vide-msg">
+      Lance le balayage pour voir où se trouvent les marges.
+    </div>
+    <template v-else>
+      <div class="cartes">
+        <div class="carte" v-for="c in cartes" :key="c.categorie">
+          <h3>
+            <span>{{ iconeCategorie(c.categorie) }} {{ labelCategorie(c.categorie) }}</span>
+            <span class="n">{{ fmt(c.total) }} rentables</span>
+          </h3>
+          <div class="carte-corps">
+            <table class="hm">
+              <thead>
+                <tr><th></th><th v-for="e in c.enchs" :key="e">.{{ e }}</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in c.tiers" :key="t">
+                  <th class="rowh">T{{ t }}</th>
+                  <td v-for="e in c.enchs" :key="e">
+                    <div class="cell"
+                         :class="{vide: !c.cases[t+'|'+e], selection: estSelection(c.categorie,t,e)}"
+                         :style="c.cases[t+'|'+e] ? styleCase(c.cases[t+'|'+e].marge) : null"
+                         @click="c.cases[t+'|'+e] && zoomer(c.categorie,t,e)"
+                         @mouseenter="bulleCase($event, c, t, e)" @mouseleave="bulle=null">
+                      {{ c.cases[t+'|'+e] ? Math.round(c.cases[t+'|'+e].marge*100)+'%' : '·' }}
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="legende">
+              <span>marge</span>
+              <span class="pas" style="background:var(--r1)"></span>
+              <span class="pas" style="background:var(--r2)"></span>
+              <span class="pas" style="background:var(--r3)"></span>
+              <span class="pas" style="background:var(--r4)"></span>
+              <span class="pas" style="background:var(--r5)"></span>
+              <span class="pas" style="background:var(--r6)"></span>
+              <span>{{ f.margeMin }} % → {{ Math.round(plafondMarge*100) }} % et plus</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-if="!cartes.length" class="vide-msg">
+        Aucune opportunité au-dessus de {{ f.margeMin }} % de marge avec ces filtres.<br>
+        Élargis les villes de vente, baisse la marge minimale, ou lance l'analyse fine.
+      </div>
+    </template>
+  </template>
+
+  <!-- ============================== TABLEAU ============================== -->
+  <template v-if="onglet==='tableau'">
+    <div v-if="!prixCharges" class="vide-msg">Lance le balayage pour remplir le tableau.</div>
+    <template v-else>
+      <div class="tablewrap">
+        <table class="tb">
+          <thead>
+            <tr>
+              <th class="g" @click="trier('nom')">Objet<span class="fl">{{ fleche('nom') }}</span></th>
+              <th @click="trier('cout')">Coût<span class="fl">{{ fleche('cout') }}</span></th>
+              <th @click="trier('revenu')">Revenu net<span class="fl">{{ fleche('revenu') }}</span></th>
+              <th @click="trier('profit')">Profit<span class="fl">{{ fleche('profit') }}</span></th>
+              <th @click="trier('marge')">Marge<span class="fl">{{ fleche('marge') }}</span></th>
+              <th class="g">Débouché</th>
+              <th @click="trier('vol')" v-if="histoCharges">Volume/j<span class="fl">{{ fleche('vol') }}</span></th>
+              <th @click="trier('age')">Prix daté de<span class="fl">{{ fleche('age') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="l in lignesAffichees" :key="l.id" :class="{on: selection===l.id}" @click="ouvrir(l)">
+              <td class="g">
+                <div class="objet">
+                  <img :src="rendu(l.id)" loading="lazy" @error="imgErr($event,l.id)" alt="">
+                  <div>
+                    <div class="nom">{{ nom(l.id) }}</div>
+                    <div class="id">
+                      <span class="pastille t">T{{ l.tier }}{{ l.ench ? '.'+l.ench : '' }}</span>
+                      <span class="pastille" v-if="l.lignee!=='commun'">{{ labelLignee(l.lignee) }}</span>
+                      {{ l.id }}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td data-lab="Coût">{{ fmtM(l.cout) }}</td>
+              <td data-lab="Revenu net">{{ fmtM(l.revenu) }}</td>
+              <td data-lab="Profit" class="pos">{{ signe(l.profit) }}</td>
+              <td data-lab="Marge" class="pos">{{ fmtPct(l.marge) }}</td>
+              <td class="g" data-lab="Débouché">
+                <span class="canal" :class="l.meilleur.bm ? 'bm' : 'ville'">
+                  {{ l.meilleur.bm ? '🏴' : '🏛️' }}
+                  {{ l.meilleur.bm ? 'Black Market' : l.meilleur.lieu }}
+                  {{ l.meilleur.instantane ? '· immédiat' : '· ordre' }}
+                </span>
+                <span v-if="l.meilleur.aberrant" class="avert-inline"
+                      :title="'Prix affiché ' + l.meilleur.ratio.toFixed(0) + '× le prix réellement transigé — valorisé au prix réel'">
+                  ⚠ corrigé
+                </span>
+                <span v-if="l.qualite>1" class="pastille">{{ labelQualite(l.qualite) }}</span>
+              </td>
+              <td data-lab="Volume/j" v-if="histoCharges">{{ l.vol!=null ? fmt(l.vol) : '—' }}</td>
+              <td data-lab="Prix daté de" :class="{na: l.age>24}">{{ fmtAge(l.age) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!lignes.length" class="vide-msg">
+          Aucune opportunité rentable avec ces filtres.<br>
+          <span style="font-size:12px">{{ resumeRejets }}</span>
+        </div>
+      </div>
+      <div class="pied" v-if="lignes.length">
+        <span>{{ fmt(lignesAffichees.length) }} sur {{ fmt(lignes.length) }} opportunités</span>
+        <button class="plat" v-if="lignesAffichees.length < lignes.length" @click="limite += 100">
+          Afficher 100 de plus
+        </button>
+      </div>
+    </template>
+  </template>
+
+  <!-- ============================== REGLAGES ============================== -->
+  <template v-if="onglet==='reglages'">
+    <div class="reglages">
+
+      <!-- Fabrication -->
+      <div class="carte">
+        <h3><span>Fabrication</span></h3>
+        <div class="carte-corps">
+          <div class="grille-filtres" style="grid-template-columns:1fr">
+            <div class="champ">
+              <span class="lab">Tarif de station (silver pour 100 de nutrition)</span>
+              <input type="number" v-model.number="r.tarifStation" min="0" step="50">
+              <span class="statut">Frais = valeur d'objet × ce tarif. À relever sur la station que tu utilises.</span>
+            </div>
+            <div class="champ">
+              <span class="lab">Ville de fabrication</span>
+              <select v-model="r.villeFabrication">
+                <option value="auto">Toujours la ville spécialisée</option>
+                <option value="aucune">Aucun bonus de ville</option>
+                <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+              </select>
+            </div>
+            <div class="champ">
+              <span class="lab">Ville de raffinage</span>
+              <select v-model="r.villeRaffinage">
+                <option value="auto">Toujours la ville spécialisée</option>
+                <option value="aucune">Aucun bonus de ville</option>
+                <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+              </select>
+            </div>
+            <div class="champ">
+              <span class="lab">Événement de retour de ressources</span>
+              <select v-model.number="r.eventBonus">
+                <option :value="0">aucun</option>
+                <option :value="10">+10 points</option>
+                <option :value="20">+20 points</option>
+              </select>
+            </div>
+            <div class="champ">
+              <div class="cases" style="flex-direction:column;gap:8px">
+                <label><input type="checkbox" v-model="r.premium"> Compte Premium (taxe 6,5 % au lieu de 10,5 %)</label>
+                <label><input type="checkbox" v-model="r.focusFabrication"> Focus à la fabrication</label>
+                <label><input type="checkbox" v-model="r.focusRaffinage"> Focus au raffinage</label>
+                <label><input type="checkbox" v-model="r.autoriserRaffinage"> Autoriser le raffinage soi-même</label>
+                <label><input type="checkbox" v-model="r.autoriserArtefact"> Autoriser la fonte de runes en artefacts</label>
+              </div>
+              <span class="statut">Le focus n'a pas de coût ici : sa consommation dépend de ta spécialisation,
+                donnée absente des fichiers du jeu. Il n'agit que sur le retour de ressources.</span>
+            </div>
+            <div class="champ">
+              <span class="lab">Undercut sur les ordres de vente (%)</span>
+              <input type="number" v-model.number="r.undercut" min="0" max="50" step="0.5">
+            </div>
+            <div class="champ">
+              <span class="lab">Nombre de candidats en analyse fine</span>
+              <input type="number" v-model.number="f.topAnalyse" min="20" max="1000" step="20">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Qualites -->
+      <div class="carte">
+        <h3><span>Répartition des qualités produites</span></h3>
+        <div class="carte-corps">
+          <div class="parts-q">
+            <template v-for="q in QUALITES" :key="q.q">
+              <label>{{ q.label }}</label>
+              <input type="number" v-model.number="r.parts[q.q]" min="0" max="100" step="1">
+            </template>
+          </div>
+          <div class="statut" style="margin-top:10px;line-height:1.5">
+            Total {{ totalParts }} %.
+            <span v-if="totalParts!==100" style="color:var(--alerte)"> Les parts sont renormalisées automatiquement.</span><br>
+            Le jeu ne publie pas ces taux : ils dépendent de ta spécialisation sur chaque recette.
+            C'est un réglage, pas une prédiction. Une qualité sans acheteur est écartée du calcul
+            plutôt que comptée à zéro.<br>
+            <b style="color:var(--txt)">Les qualités au-delà de Normale ne sont chargées que par l'analyse fine.</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bonus de raffinage -->
+      <div class="carte">
+        <h3><span>Bonus de ville — raffinage</span><span class="n">+15 points de retour</span></h3>
+        <div class="carte-corps">
+          <table class="rg">
+            <thead><tr><th>Transformation</th><th>Ville</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(e,k) in table.raffinage" :key="k">
+                <td>{{ e.libelle }}</td>
+                <td><select v-model="e.ville" @change="e.verifie=false; majTable()">
+                  <option :value="null">aucune</option>
+                  <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+                </select></td>
+                <td><button class="aconf" :class="{conf:e.verifie}" @click="e.verifie=!e.verifie; majTable()">
+                  {{ e.verifie ? '✓ vérifié' : 'à vérifier' }}</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Bonus de fabrication -->
+      <div class="carte">
+        <h3><span>Bonus de ville — fabrication</span><span class="n">+15 points de retour</span></h3>
+        <div class="carte-corps">
+          <table class="rg">
+            <thead><tr><th>Groupe d'objets</th><th>Ville</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(e,k) in table.fabrication" :key="k">
+                <td>{{ e.libelle }}</td>
+                <td><select v-model="e.ville" @change="e.verifie=false; majTable()">
+                  <option :value="null">aucune</option>
+                  <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+                </select></td>
+                <td><button class="aconf" :class="{conf:e.verifie}" @click="e.verifie=!e.verifie; majTable()">
+                  {{ e.verifie ? '✓ vérifié' : 'à vérifier' }}</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="statut" style="margin-top:10px;line-height:1.5">
+            Ces associations sont mes suppositions, pas des données du jeu. Ouvre la station en jeu,
+            regarde le retour de ressources annoncé, et confirme ou corrige. Tant qu'une ligne est
+            « à vérifier », elle reste comptée dans le calcul mais signalée en haut de page.
+          </div>
+        </div>
+      </div>
+
+      <div class="carte">
+        <h3><span>Cache</span></h3>
+        <div class="carte-corps">
+          <div class="statut" style="line-height:1.6">
+            Les prix sont gardés 30 minutes, l'historique 6 heures, dans IndexedDB
+            (localStorage ne suffirait pas pour ce volume).
+          </div>
+          <button class="plat" style="margin-top:10px" @click="viderLeCache()">Vider le cache</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ============================== DETAIL ============================== -->
+  <template v-if="detail">
+    <div class="voile" @click="detail=null"></div>
+    <div class="drawer">
+      <div class="drawer-tete">
+        <img :src="rendu(detail.id, detail.qualite)" @error="imgErr($event,detail.id)" alt="">
+        <div style="min-width:0">
+          <div style="font-weight:700">{{ nom(detail.id) }}</div>
+          <div class="sub">{{ detail.id }}</div>
+          <div style="margin-top:4px">
+            <span class="pastille t">T{{ detail.tier }}{{ detail.ench ? '.'+detail.ench : '' }}</span>
+            <span class="pastille">{{ labelStation(detail.station) }}</span>
+            <span class="pastille" v-if="detail.lignee!=='commun'">{{ labelLignee(detail.lignee) }}</span>
+          </div>
+        </div>
+        <button class="x" @click="detail=null">×</button>
+      </div>
+
+      <div class="drawer-corps">
+        <div class="bloc">
+          <h4>Bilan par unité produite</h4>
+          <div class="kv"><span>Matières (après retour de {{ fmtPct(decomposition.taux) }})</span>
+            <b>{{ fmtM(decomposition.matieres) }}</b></div>
+          <div class="kv"><span>Frais de station</span><b>{{ fmtM(decomposition.frais) }}</b></div>
+          <div class="kv"><span>Coût de revient</span><b>{{ fmtM(decomposition.cout) }}</b></div>
+          <div class="kv"><span>Revenu net après taxe</span><b>{{ fmtM(detail.revenu) }}</b></div>
+          <div class="kv"><span>Profit</span><b class="pos">{{ signe(detail.profit) }}</b></div>
+          <div class="kv"><span>Marge</span><b class="pos">{{ fmtPct(detail.marge) }}</b></div>
+        </div>
+
+        <div class="bloc">
+          <h4>Où vendre</h4>
+          <div class="canaux-liste">
+            <div class="canal-ligne" v-for="(d,i) in detail.canaux" :key="d.canal+d.lieu"
+                 :class="{gagnant:i===0}">
+              <span class="canal" :class="d.bm ? 'bm':'ville'">{{ d.bm ? '🏴' : '🏛️' }} {{ d.lieu }}</span>
+              <span>{{ d.instantane ? 'immédiat' : 'ordre de vente' }}</span>
+              <span class="sub">taxe {{ fmtPct(d.taxe) }}</span>
+              <span v-if="d.aberrant" class="avert-inline">⚠ {{ d.ratio.toFixed(0) }}× le réel</span>
+              <span class="m">{{ fmtM(d.net) }}</span>
+            </div>
+          </div>
+          <div class="statut" style="margin-top:8px">
+            « Immédiat » = vendre dans un ordre d'achat déjà posté : taxe {{ fmtPct(eco.instant) }},
+            pas de frais d'ordre. « Ordre de vente » = poster et attendre : taxe {{ fmtPct(eco.ordre) }},
+            moins {{ r.undercut }} % d'undercut.
+          </div>
+        </div>
+
+        <div class="bloc" v-if="detail.parQualite && detail.parQualite.length>1">
+          <h4>Par qualité produite</h4>
+          <div class="kv" v-for="pq in detail.parQualite" :key="pq.qualite">
+            <span>{{ labelQualite(pq.qualite) }} <span class="sub">({{ Math.round(pq.part*100) }} % de la production)</span></span>
+            <b>{{ pq.meilleur ? fmtM(pq.meilleur.net) : 'aucun acheteur' }}</b>
+          </div>
+        </div>
+
+        <div class="bloc">
+          <h4>Arbre de coût — acheter, raffiner ou fabriquer</h4>
+          <div class="arbre">
+            <arbre-noeud v-for="l in decomposition.lignes" :key="l.id" :ligne="l" :recette="detail.id"></arbre-noeud>
+          </div>
+          <div class="statut" style="margin-top:8px">
+            Clique une voie pour la forcer. La quantité affichée en petit est la quantité
+            réellement consommée, après retour de ressources.
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Infobulle de la carte de repérage -->
+  <div v-if="bulle" class="bulle" :style="{left:bulle.x+'px', top:bulle.y+'px'}">
+    <span class="t">{{ bulle.titre }}</span>
+    <span v-html="bulle.corps"></span>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script type="module" src="js/app.js"></script>
+<style>[v-cloak]{display:none}</style>
+</body>
+</html>
