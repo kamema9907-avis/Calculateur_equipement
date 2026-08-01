@@ -31,6 +31,45 @@ Aucun `npm`, aucun build : Vue 3 est chargé par CDN.
 
 ---
 
+## 🌐 En ligne (GitHub Pages)
+
+👉 **https://kamema9907-avis.github.io/Calculateur_equipement/**
+
+Utilisable depuis n'importe quel appareil : PC, tablette, smartphone (l'interface
+bascule en cartes sur petit écran). Sur mobile, *Ajouter à l'écran d'accueil* donne un
+accès en un tap.
+
+Les appels à l'API de prix fonctionnent depuis Pages (CORS autorisé, tout en HTTPS).
+
+Pages sert la branche `main` à la racine. Le développement se fait sur la branche de
+version en cours (`version-2`) ; pour publier une amélioration :
+
+```
+git checkout main
+git merge version-2
+git push
+git checkout version-2
+```
+
+Le site se met à jour tout seul 30 à 60 secondes après le push.
+
+### Clore une version et ouvrir la suivante
+
+```
+git tag -a version-2 -m "Version 2 — description"
+git branch version-3 refs/heads/version-2
+git checkout version-3
+git push origin refs/tags/version-2:refs/tags/version-2
+git push -u origin refs/heads/version-3:refs/heads/version-3
+```
+
+⚠️ Les refspecs complets (`refs/heads/…`, `refs/tags/…`) sont **nécessaires** : chaque
+version porte une branche et un tag de même nom, et `git branch version-3 version-2`
+échoue alors avec *ambiguous object name*, tout comme `git push origin version-2`
+échoue avec *src refspec matches more than one*.
+
+---
+
 ## 🧭 Comment s'en servir
 
 L'outil fonctionne **en deux temps**, et c'est délibéré.
