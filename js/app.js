@@ -132,7 +132,10 @@ const app = createApp({
       autoriserRaffinage: true,
       autoriserArtefact: true,
       undercut: 3,
-      parts: { 1: 100, 2: 0, 3: 0, 4: 0, 5: 0 },
+      // Distribution reelle du tirage de qualite a la fabrication, 1 jet sans
+      // bonus (wiki, page Crafting). Focus et nourriture de craft ajoutent des
+      // jets dont seul le meilleur compte : ces parts sont donc un PLANCHER.
+      parts: { 1: 68.9, 2: 25, 3: 5, 4: 1.1, 5: 0.1 },
     });
 
     // ---- Persistance ----
@@ -488,6 +491,28 @@ const app = createApp({
     function majTable() { V.sauverTable(table); versionPrix.value++; }
     const nbNonVerif = computed(() => V.nbNonVerifiees(table));
 
+    // 30 categories a plat seraient illisibles : on les regroupe par ville
+    // bonifiante, ce qui est aussi la façon dont on les verifie en jeu (on ouvre
+    // une ville, on regarde tout ce qu'elle bonifie).
+    const fabricationParVille = computed(() => {
+      const g = {};
+      for (const [cle, e] of Object.entries(table.fabrication)) {
+        const v = e.ville || '(aucune)';
+        (g[v] = g[v] || []).push({ cle, e });
+      }
+      return [...V.VILLES, '(aucune)']
+        .filter(v => g[v])
+        .map(v => ({ ville: v, entrees: g[v] }));
+    });
+
+    // Combien de recettes du catalogue chaque categorie touche : sans ça, une
+    // ligne fausse dans un coin de la table passe pour un detail.
+    const poidsCategories = computed(() => {
+      const n = {};
+      for (const r of donnees.recipes) if (r.bonusCategorie) n[r.bonusCategorie] = (n[r.bonusCategorie] || 0) + 1;
+      return n;
+    });
+
     // ---- Divers ----
     function imgErr(ev, id) {
       if (ev.target.dataset.fb) return;
@@ -510,6 +535,7 @@ const app = createApp({
       perimetre, lignes, lignesAffichees, estimation, eco, partsNormalisees, totalParts,
       meilleurProfit, partInstant, nbBlackMarket, nbAberrants, resumeRejets,
       cartes, plafondMarge, decomposition, nbNonVerif,
+      fabricationParVille, poidsCategories,
       // actions
       balayer, analyseFine, viderLeCache, trier, fleche, ouvrir, majTable,
       zoomer, estSelection, bulleCase, styleCase, imgErr,

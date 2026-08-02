@@ -43,63 +43,70 @@ export const BONUS_RAFFINAGE_DEFAUT = {
 };
 
 // ---------------------------------------------------------------------------
-//  Fabrication — quelle ville bonifie quel groupe d'objets.
+//  Fabrication — quelle ville bonifie quoi.
 //
-//  Le jeu decoupe plus finement que la station : plusieurs groupes ne suivent
-//  PAS l'atelier qui les produit. Les gants de guerre sortent a la Forge des
-//  Guerriers mais portent le bonus de Caerleon ; les sacs sortent du Fabricant
-//  d'Outils comme les capes et les outils, mais portent celui de Brecilien.
-//  C'est pourquoi la cle passe par cleBonusFabrication() plutot que par un
-//  simple `station|groupe` : les exceptions doivent primer sur la station.
+//  Le bonus s'applique PIECE PAR PIECE et par arbre d'armes, PAS par atelier.
+//  Les trois pieces d'une meme armure dependent de trois villes differentes :
+//  bottes de plaque a Martlock, plastron a Bridgewatch, casque a Fort Sterling.
+//  Une table clavetee sur l'atelier est donc structurellement incapable de dire
+//  la verite — c'etait l'erreur des premieres versions de ce fichier.
 //
-//  Confirme par Vigile (2026-08-01) : gants de guerre, sacs, equipement de
-//  recolte et outils. Le reste est encore suppose.
+//  Les 30 categories ci-dessous viennent du wiki officiel
+//  (Albion_Analyse_site_web/data/city_bonuses.json, extraction d'aout 2026), et
+//  recoupent les quatre que Vigile avait confirmees en jeu : gants de guerre,
+//  equipement de recolte et outils a Caerleon, sacs a Brecilien.
+//
+//  La categorie de chaque recette est calculee a la generation des donnees, dans
+//  le champ `bonusCategorie` : voir scripts/build-data.js.
+//
+//  « Food » et « Potions » appartiennent aussi a la table du jeu (Caerleon et
+//  Brecilien) mais ne sont pas dans ce calculateur : ils relevent du
+//  calculateur Cuisine & Potions.
 // ---------------------------------------------------------------------------
 export const BONUS_FABRICATION_DEFAUT = {
-  // --- confirme ---
-  'gants_de_guerre':           { ville: 'Caerleon',    libelle: 'Gants de guerre (gantelets)',            verifie: true },
-  'sacs':                      { ville: 'Brecilien',   libelle: 'Sacs',                                   verifie: true },
-  'recolte':                   { ville: 'Caerleon',    libelle: 'Équipement de récolte (dont sacs à dos)', verifie: true },
-  'outils':                    { ville: 'Caerleon',    libelle: 'Outils de récolte',                      verifie: true },
-  // --- suppose, a verifier en jeu ---
-  // Les capes partent SANS ville : Vigile ne les a pas mentionnees, et un bonus
-  // invente gonflerait le profit en silence. Aucun bonus sous-estime, ce qui est
-  // le bon sens de l'erreur.
-  'capes':                     { ville: null,          libelle: 'Capes',                                  verifie: false },
-  'warriors_forge|armure':     { ville: 'Bridgewatch', libelle: 'Armures de plaque',                      verifie: false },
-  'warriors_forge|arme':       { ville: 'Bridgewatch', libelle: 'Armes de guerrier (hors gants)',         verifie: false },
-  'warriors_forge|secondaire': { ville: 'Bridgewatch', libelle: 'Boucliers',                              verifie: false },
-  'mages_tower|armure':        { ville: 'Thetford',    libelle: 'Armures de tissu',                       verifie: false },
-  'mages_tower|arme':          { ville: 'Thetford',    libelle: 'Bâtons de mage',                         verifie: false },
-  'mages_tower|secondaire':    { ville: 'Thetford',    libelle: 'Tomes, orbes, totems',                   verifie: false },
-  'hunters_lodge|armure':      { ville: 'Lymhurst',    libelle: 'Armures de cuir',                        verifie: false },
-  'hunters_lodge|arme':        { ville: 'Lymhurst',    libelle: 'Armes de chasseur',                      verifie: false },
-  'hunters_lodge|secondaire':  { ville: 'Lymhurst',    libelle: 'Torches, cors, lampes',                  verifie: false },
+  // --- Martlock ---
+  'Axe':                { ville: 'Martlock',      libelle: 'Haches',                verifie: true },
+  'Quarterstaff':       { ville: 'Martlock',      libelle: 'Bâtons de combat',      verifie: true },
+  'Frost Staff':        { ville: 'Martlock',      libelle: 'Bâtons de glace',       verifie: true },
+  'Plate Shoes':        { ville: 'Martlock',      libelle: 'Bottes de plaque',      verifie: true },
+  'Off-Hand':           { ville: 'Martlock',      libelle: 'Armes secondaires',     verifie: true },
+  // --- Bridgewatch ---
+  'Crossbow':           { ville: 'Bridgewatch',   libelle: 'Arbalètes',             verifie: true },
+  'Dagger':             { ville: 'Bridgewatch',   libelle: 'Dagues',                verifie: true },
+  'Cursed Staff':       { ville: 'Bridgewatch',   libelle: 'Bâtons maudits',        verifie: true },
+  'Plate Armor':        { ville: 'Bridgewatch',   libelle: 'Plastrons de plaque',   verifie: true },
+  'Cloth Shoes':        { ville: 'Bridgewatch',   libelle: 'Chaussures de tissu',   verifie: true },
+  // --- Lymhurst ---
+  'Sword':              { ville: 'Lymhurst',      libelle: 'Épées',                 verifie: true },
+  'Bow':                { ville: 'Lymhurst',      libelle: 'Arcs',                  verifie: true },
+  'Arcane Staff':       { ville: 'Lymhurst',      libelle: 'Bâtons arcaniques',     verifie: true },
+  'Leather Helmet':     { ville: 'Lymhurst',      libelle: 'Casques de cuir',       verifie: true },
+  'Leather Shoes':      { ville: 'Lymhurst',      libelle: 'Bottes de cuir',        verifie: true },
+  // --- Fort Sterling ---
+  'Hammer':             { ville: 'Fort Sterling', libelle: 'Marteaux',              verifie: true },
+  'Spear':              { ville: 'Fort Sterling', libelle: 'Lances',                verifie: true },
+  'Holy Staff':         { ville: 'Fort Sterling', libelle: 'Bâtons sacrés',         verifie: true },
+  'Plate Helmet':       { ville: 'Fort Sterling', libelle: 'Casques de plaque',     verifie: true },
+  'Cloth Armor':        { ville: 'Fort Sterling', libelle: 'Robes de tissu',        verifie: true },
+  // --- Thetford ---
+  'Mace':               { ville: 'Thetford',      libelle: 'Masses',                verifie: true },
+  'Nature Staff':       { ville: 'Thetford',      libelle: 'Bâtons de la nature',   verifie: true },
+  'Fire Staff':         { ville: 'Thetford',      libelle: 'Bâtons de feu',         verifie: true },
+  'Leather Armor':      { ville: 'Thetford',      libelle: 'Vestes de cuir',        verifie: true },
+  'Cloth Helmet':       { ville: 'Thetford',      libelle: 'Capuches de tissu',     verifie: true },
+  // --- Caerleon ---
+  'War Gloves':         { ville: 'Caerleon',      libelle: 'Gants de guerre',       verifie: true },
+  'Shapeshifter Staff': { ville: 'Caerleon',      libelle: 'Bâtons métamorphes',    verifie: true },
+  'Gathering Gear':     { ville: 'Caerleon',      libelle: 'Équipement de récolte', verifie: true },
+  'Tools':              { ville: 'Caerleon',      libelle: 'Outils de récolte',     verifie: true },
+  // --- Brecilien ---
+  'Capes':              { ville: 'Brecilien',     libelle: 'Capes',                 verifie: true },
+  'Bags':               { ville: 'Brecilien',     libelle: 'Sacs',                  verifie: true },
 };
 
-// Groupe de bonus auquel appartient une recette, d'apres sa categorie.
-// N'est plus consulte que pour les armes et armures des trois stations : les
-// categories a exception sont interceptees avant par cleBonusFabrication().
-export function groupeDe(categorie) {
-  switch (categorie) {
-    case 'tete': case 'poitrine': case 'pieds': return 'armure';
-    case 'arme_secondaire': return 'secondaire';
-    default: return 'arme';
-  }
-}
-
-// Ligne de la table qui s'applique a une recette.
-// L'ordre des regles est le coeur de la fonction : une exception connue prime
-// toujours sur la station qui produit l'objet.
+// La categorie est resolue une fois pour toutes a la generation des donnees.
 export function cleBonusFabrication(recette) {
-  if (recette.famille === 'KNUCKLES') return 'gants_de_guerre';
-  switch (recette.categorie) {
-    case 'sac':     return 'sacs';
-    case 'cape':    return 'capes';
-    case 'recolte': return 'recolte';   // y compris les sacs a dos GATHERER
-    case 'outil':   return 'outils';
-  }
-  return recette.station + '|' + groupeDe(recette.categorie);
+  return recette.bonusCategorie || null;
 }
 
 // Type de raffinage d'un id de ressource raffinee, ou null si ce n'en est pas une.
@@ -112,11 +119,10 @@ export function typeRaffinage(id) {
 // ---------------------------------------------------------------------------
 //  Etat vivant de la table : les defauts, ecrases par ce que Vigile a corrige.
 // ---------------------------------------------------------------------------
-// La version est dans la cle : les defauts ont change (baremes 40/15, cinq
-// lignes de raffinage et quatre de fabrication desormais confirmees, groupes du
-// Fabricant d'Outils eclates). Une sauvegarde de l'ancienne forme rendrait ces
-// lignes a leur etat « a verifier » et masquerait la correction.
-const CLE = 'albion.eq.villes.v2';
+// La version est dans la cle. La v3 abandonne les groupes par atelier au profit
+// des 30 categories du wiki : aucune ancienne cle n'existe plus, et une
+// sauvegarde de l'ancienne forme ne pourrait que remettre des valeurs fausses.
+const CLE = 'albion.eq.villes.v3';
 
 export function chargerTable() {
   const table = {

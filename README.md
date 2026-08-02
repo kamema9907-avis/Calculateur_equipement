@@ -3,7 +3,7 @@
 Page web (Vue 3) pour répondre à une seule question : **qu'est-ce qui vaut la peine
 d'être fabriqué en ce moment ?**
 
-Couvre les **6 102 recettes** d'équipement du jeu : armes, armes secondaires, armures
+Couvre les **6 677 recettes** d'équipement du jeu : armes, armes secondaires, armures
 tête / poitrine / pieds sur les trois lignes (plaque, cuir, tissu), capes, équipement
 de récolte, sacs et outils.
 
@@ -246,13 +246,11 @@ la pièce ou on la vend ailleurs.
 
 ## 🏙️ La table des bonus de ville
 
-Quelle ville bonifie quoi **n'existe dans aucun fichier de données du jeu**. La table
-est écrite à la main dans [js/villes.js](js/villes.js), éditable depuis l'onglet
-Réglages, et tes corrections sont mémorisées.
+Table issue du wiki officiel, recoupée avec ce qui a été vérifié en jeu. Elle vit dans
+[js/villes.js](js/villes.js), reste éditable depuis l'onglet Réglages, et tes
+corrections sont mémorisées.
 
-### Confirmé
-
-**Raffinage — les cinq ressources de base :**
+### Raffinage — les cinq ressources de base
 
 | Transformation | Ville |
 |---|---|
@@ -262,28 +260,31 @@ Réglages, et tes corrections sont mémorisées.
 | Bois → Planches | Fort Sterling |
 | Pierre → Blocs | Bridgewatch |
 
-**Fabrication — les groupes qui ne suivent pas leur atelier :**
+### Fabrication — pièce par pièce, pas par atelier
 
-| Groupe | Ville |
+⚠️ **C'est le piège de cette mécanique.** Le bonus ne suit pas l'atelier qui produit
+l'objet : les trois pièces d'une même armure dépendent de **trois villes différentes**.
+
+| Ville | Ce qu'elle bonifie |
 |---|---|
-| Gants de guerre (gantelets) | **Caerleon** |
-| Équipement de récolte, sacs à dos compris | **Caerleon** |
-| Outils de récolte | **Caerleon** |
-| Sacs | **Brécilien** |
+| **Martlock** | Haches · Bâtons de combat · Bâtons de glace · **Bottes de plaque** · Toutes les armes secondaires |
+| **Bridgewatch** | Arbalètes · Dagues · Bâtons maudits · **Plastrons de plaque** · Chaussures de tissu |
+| **Lymhurst** | Épées · Arcs · Bâtons arcaniques · Casques de cuir · Bottes de cuir |
+| **Fort Sterling** | Marteaux · Lances · Bâtons sacrés · **Casques de plaque** · Robes de tissu |
+| **Thetford** | Masses · Bâtons de la nature · Bâtons de feu · Vestes de cuir · Capuches de tissu |
+| **Caerleon** | Gants de guerre · Bâtons métamorphes · Équipement de récolte · Outils |
+| **Brécilien** | Capes · Sacs |
 
-Les gants de guerre sortent de la Forge des Guerriers et les sacs du Fabricant
-d'Outils : ces bonus **ne suivent donc pas la station**. La table les traite comme des
-exceptions prioritaires, avant la règle par atelier.
+Deux conséquences pratiques :
 
-### Encore supposé — à vérifier en jeu
+- Les **armes secondaires** vont toutes à Martlock, qu'il s'agisse d'un bouclier de la
+  Forge, d'un tome de la Tour des Mages ou d'une torche de la Loge.
+- Une panoplie complète ne se fabrique **jamais** dans une seule ville au bonus maximum.
 
-Les armes, armures et armes secondaires des trois stations (plaque → Bridgewatch,
-tissu → Thetford, cuir → Lymhurst), plus les **capes**, laissées volontairement
-**sans ville** : personne ne me l'a confirmée, et un bonus inventé gonflerait le profit
-en silence. Aucun bonus sous-estime, ce qui est le bon sens de l'erreur.
-
-La page affiche un bandeau tant qu'il reste des lignes non confirmées. Ouvre la station
-en jeu, compare le retour de ressources annoncé, puis confirme ou corrige.
+La catégorie de chaque recette est résolue une fois à la génération des données, par
+jointure sur la fiche objet du wiki, et stockée dans le champ `bonusCategorie`. Le
+générateur **échoue** si une recette n'en trouve pas : un objet sans catégorie
+recevrait le taux de base sans que rien ne le signale.
 
 ---
 
@@ -323,14 +324,24 @@ Modules ES natifs, aucun build.
 
 ## 🔄 Régénérer les données après un patch
 
-Les recettes viennent de la librairie voisine `../Albion_librairie_des_recettes_du_jeu`.
-
 ```
 node scripts/build-data.js
 ```
 
-Le script extrait les recettes d'équipement plus toute leur chaîne de raffinage, les
-noms FR/EN, la fonderie d'artefacts et les taux de taxe.
+**Deux sources, complémentaires :**
+
+| Source | Ce qu'elle apporte |
+|---|---|
+| `../Albion_librairie_des_recettes_du_jeu` (dumps, juin 2026) | Les recettes, leurs identifiants machine et leur nutrition |
+| `../Albion_Analyse_site_web` (wiki, août 2026) | La catégorie de bonus de ville, et les objets absents des dumps |
+
+Les dumps de juin ne connaissaient ni la ligne **Royale** ni une partie des artefacts
+**Crystal** : 575 recettes que le générateur va chercher dans le wiki et fusionne. Le
+wiki ne publiant aucun identifiant machine, la résolution passe par `noms_items.json`.
+Ces recettes portent `source: "wiki"` pour rester traçables.
+
+Le rapport du générateur annonce la répartition par ville bonifiante, ce qui permet de
+voir d'un coup d'œil qu'aucune ville n'est anormalement chargée.
 
 ---
 
@@ -339,13 +350,24 @@ noms FR/EN, la fonderie d'artefacts et les taux de taxe.
 - **Coût en focus** : dépend de ta spécialisation par recette, donnée absente des
   fichiers du jeu. Le focus est modélisé par son effet sur le retour de ressources,
   pas par sa consommation. Le pool de focus est fini, l'outil l'ignore.
-- **Répartition des qualités** : c'est un réglage, pas une prédiction. Le jeu ne
-  publie pas ces taux.
+- **Répartition des qualités** : les valeurs par défaut (68,9 / 25 / 5 / 1,1 / 0,1 %)
+  sont le tirage de base à **1 jet, sans bonus**. Le focus et la nourriture de craft
+  ajoutent des jets dont seul le meilleur compte : ta production réelle sort meilleure.
+  C'est donc un plancher, et un réglage, pas une prédiction.
+- **Valeur d'objet à T2** : traitée comme nulle, donc frais de station nuls sur
+  16 objets. Le wiki leur donne une valeur, mais elle représente quelques silver sur
+  des objets sans marché.
+- **Artefacts avaloniens** : leur valeur d'objet diffère du wiki de 0,3 à 0,6 %
+  (30 objets), ce qui ne bouge que les frais de station.
+- **Capacité de craft** : la mécanique anti-monopole (un craft consomme 50 % de l'item
+  value du bâtiment, régénération sur 24 h) n'est pas modélisée. Elle ne mord que sur
+  de la production de masse, où il faut répartir sur plusieurs bâtiments.
 - **Profondeur du carnet d'ordres** : l'API ne publie que le prix de la première
   unité. Acheter en masse fera glisser ton prix d'achat au-delà de ce qui est annoncé.
 - **Frais et délais du Black Market** : non modélisés. Un ordre d'achat peut être
   consommé par quelqu'un d'autre avant toi.
-- **Bonus de ville des armes, armures et capes** : encore supposés, voir plus haut.
+- **Bonus de hideout et Power Cores** : non modélisés. En zone noire ils remplacent le
+  bonus de ville (15 en raffinage, 1 à 26 en craft, jusqu'à +30 supplémentaires).
 - **Journaux de laboureurs** : fabriquer remplit des journaux qui valent du silver.
   Ce revenu annexe n'est pas compté — il demanderait la renommée d'artisanat par
   recette, absente des données.

@@ -567,9 +567,11 @@
           <div class="statut" style="margin-top:10px;line-height:1.5">
             Total {{ totalParts }} %.
             <span v-if="totalParts!==100" style="color:var(--alerte)"> Les parts sont renormalisées automatiquement.</span><br>
-            Le jeu ne publie pas ces taux : ils dépendent de ta spécialisation sur chaque recette.
-            C'est un réglage, pas une prédiction. Une qualité sans acheteur est écartée du calcul
-            plutôt que comptée à zéro.<br>
+            Valeurs par défaut = le <b style="color:var(--txt)">tirage de base à 1 jet</b>, sans bonus.
+            Le focus et la nourriture de craft ajoutent des jets dont seul le meilleur compte :
+            ta production réelle sort donc <b style="color:var(--txt)">meilleure que ça</b>. Traite
+            ces parts comme un plancher, et monte-les selon ta spécialisation.<br>
+            Une qualité sans acheteur est écartée du calcul plutôt que comptée à zéro.<br>
             <b style="color:var(--txt)">Les qualités au-delà de Normale ne sont chargées que par l'analyse fine.</b>
           </div>
         </div>
@@ -597,27 +599,37 @@
       </div>
 
       <!-- Bonus de fabrication -->
-      <div class="carte">
-        <h3><span>Bonus de ville — fabrication</span><span class="n">+15 points de retour</span></h3>
+      <div class="carte" style="grid-column:1 / -1">
+        <h3><span>Bonus de ville — fabrication</span><span class="n">+15 points de retour · 30 catégories</span></h3>
         <div class="carte-corps">
-          <table class="rg">
-            <thead><tr><th>Groupe d'objets</th><th>Ville</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="(e,k) in table.fabrication" :key="k">
-                <td>{{ e.libelle }}</td>
-                <td><select v-model="e.ville" @change="e.verifie=false; majTable()">
-                  <option :value="null">aucune</option>
-                  <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
-                </select></td>
-                <td><button class="aconf" :class="{conf:e.verifie}" @click="e.verifie=!e.verifie; majTable()">
-                  {{ e.verifie ? '✓ vérifié' : 'à vérifier' }}</button></td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="statut" style="margin-top:10px;line-height:1.5">
-            Ces associations sont mes suppositions, pas des données du jeu. Ouvre la station en jeu,
-            regarde le retour de ressources annoncé, et confirme ou corrige. Tant qu'une ligne est
-            « à vérifier », elle reste comptée dans le calcul mais signalée en haut de page.
+          <div class="statut" style="margin-bottom:12px;line-height:1.5">
+            Le bonus s'applique <b style="color:var(--txt)">pièce par pièce</b>, pas par atelier :
+            les bottes de plaque sont bonifiées à Martlock, le plastron à Bridgewatch et le casque
+            à Fort Sterling. Table issue du wiki officiel, recoupée avec ce que tu as confirmé en jeu.
+          </div>
+          <div class="reglages" style="grid-template-columns:repeat(auto-fit,minmax(270px,1fr))">
+            <div v-for="g in fabricationParVille" :key="g.ville">
+              <div class="ville-head" style="border-radius:6px 6px 0 0">
+                <b>{{ g.ville }}</b>
+                <span class="chiffres">{{ g.entrees.length }} catégories</span>
+              </div>
+              <table class="rg">
+                <tbody>
+                  <tr v-for="x in g.entrees" :key="x.cle">
+                    <td>{{ x.e.libelle }}
+                      <span class="sub" style="font-size:10px">{{ fmt(poidsCategories[x.cle] || 0) }} recettes</span>
+                    </td>
+                    <td style="width:120px"><select v-model="x.e.ville" @change="x.e.verifie=false; majTable()">
+                      <option :value="null">aucune</option>
+                      <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+                    </select></td>
+                    <td style="width:34px" v-if="!x.e.verifie">
+                      <button class="aconf" @click="x.e.verifie=true; majTable()">à vérifier</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

@@ -1,17 +1,24 @@
 /*
  * build-data.js
  * -----------------------------------------------------------------------------
- * Genere le fichier de donnees consomme par index.html, a partir de la librairie
- * voisine.
+ * Genere le fichier de donnees consomme par index.html.
  *
- * Source : ../Albion_librairie_des_recettes_du_jeu/data  (~12 Mo)
+ * DEUX sources, complementaires :
+ *
+ *   1. ../Albion_librairie_des_recettes_du_jeu/data  (dumps Jaccak, juin 2026)
+ *      Les recettes, avec leurs identifiants machine et leur nutrition.
+ *
+ *   2. ../Albion_Analyse_site_web/data               (wiki officiel, aout 2026)
+ *      La categorie de bonus de ville de chaque objet, et les objets que les
+ *      dumps de juin n'avaient pas encore (ligne Royale, artefacts Crystal).
+ *
  * Sortie : data/equipment-data.json
  *
- * Contenu de la sortie :
  *   - recipes   : tout l'equipement (armes, armes secondaires, tete/poitrine/pieds
  *                 sur les 3 lignes, capes, equipement de recolte, sacs, outils)
  *                 PLUS la fermeture des sous-recettes, c'est-a-dire toute la chaine
  *                 de raffinage (lingot -> lingot du tier inferieur -> ... -> T2).
+ *                 Chaque recette d'equipement porte sa `bonusCategorie`.
  *   - artefacts : voie « fabriquer l'artefact avec des runes » (fonderie d'artefacts).
  *   - names     : noms FR + EN de chaque item reference.
  *   - economy   : taux de taxes, separes ordre de vente / vente instantanee.
@@ -24,16 +31,76 @@ const fs = require('fs');
 const path = require('path');
 
 const LIB = path.resolve(__dirname, '..', '..', 'Albion_librairie_des_recettes_du_jeu', 'data');
+const WIKI = path.resolve(__dirname, '..', '..', 'Albion_Analyse_site_web', 'data');
 const OUT = path.resolve(__dirname, '..', 'data', 'equipment-data.json');
 
 const load = rel => JSON.parse(fs.readFileSync(path.join(LIB, rel), 'utf8'));
+const loadWiki = rel => JSON.parse(fs.readFileSync(path.join(WIKI, rel), 'utf8'));
 
-console.log('Lecture de la librairie depuis :', LIB);
+console.log('Recettes  :', LIB);
+console.log('Wiki      :', WIKI);
 
 const allRecipes = load('all-recipes.json').recipes;
 const names = load('names.json').items;
 const meta = load('meta.json');
 const foundry = load('recipes/artefact_foundry.json');
+
+const wikiItems = loadWiki('items.json');
+const wikiNoms = loadWiki('noms_items.json');
+const wikiRecettes = loadWiki('recipes.json');
+const wikiVilles = loadWiki('city_bonuses.json');
+
+// Index du wiki par identifiant machine.
+const wikiParId = {};
+for (const it of wikiItems) if (it.unique_name) wikiParId[it.unique_name] = it;
+
+// ---------------------------------------------------------------------------
+//  Categorie de bonus de ville
+//
+//  Le jeu attribue le bonus de fabrication PIECE PAR PIECE et par arbre d'armes,
+//  pas par atelier : les bottes de plaque sont bonifiees a Martlock, le plastron
+//  a Bridgewatch et le casque a Fort Sterling. Il y a 32 categories.
+//
+//  On les resout ici, une fois, plutot qu'a l'affichage : la sous-categorie de
+//  boutique du wiki est exactement cette granularite.
+// ---------------------------------------------------------------------------
+const SOUS_CATEGORIE = {
+  arcanestaff: 'Arcane Staff', axe: 'Axe', bow: 'Bow', crossbow: 'Crossbow',
+  cursestaff: 'Cursed Staff', dagger: 'Dagger', firestaff: 'Fire Staff',
+  froststaff: 'Frost Staff', hammer: 'Hammer', holystaff: 'Holy Staff',
+  knuckles: 'War Gloves', mace: 'Mace', naturestaff: 'Nature Staff',
+  quarterstaff: 'Quarterstaff', shapeshifterstaff: 'Shapeshifter Staff',
+  spear: 'Spear', sword: 'Sword',
+  cloth_armor: 'Cloth Armor', leather_armor: 'Leather Armor', plate_armor: 'Plate Armor',
+  cloth_helmet: 'Cloth Helmet', leather_helmet: 'Leather Helmet', plate_helmet: 'Plate Helmet',
+  cloth_shoes: 'Cloth Shoes', leather_shoes: 'Leather Shoes', plate_shoes: 'Plate Shoes',
+};
+
+// Categories ou toute la famille partage une seule ville, quelle que soit la
+// sous-categorie : les 4 types d'armes secondaires vont tous a Martlock, les
+// 15 declinaisons de capes toutes a Brecilien.
+const PAR_CATEGORIE = {
+  offhands: 'Off-Hand', capes: 'Capes', bags: 'Bags', gathering: 'Gathering Gear',
+};
+
+function categorieBonus(id) {
+  const base = id.split('@')[0];
+  const it = wikiParId[base];
+  if (it) {
+    const parCat = PAR_CATEGORIE[it.shop_category];
+    if (parCat) return parCat;
+    const parSous = SOUS_CATEGORIE[it.shop_subcategory];
+    if (parSous) return parSous;
+  }
+  // Replis, pour ce que l'extraction du wiki ne couvre pas. Chacun est verifie :
+  // les outils de recolte et les batons de moine noir n'ont pas de fiche objet.
+  if (base.includes('_TOOL_')) return 'Tools';
+  if (base.includes('GATHERER')) return 'Gathering Gear';
+  if (base.includes('COMBATSTAFF')) return 'Quarterstaff';
+  if (/^T\d_BAG/.test(base)) return 'Bags';
+  if (/^T\d_CAPE/.test(base)) return 'Capes';
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 //  Perimetre
@@ -137,6 +204,10 @@ for (const r of allRecipes) if (!recipeById[r.id]) recipeById[r.id] = r;
 //  100 unites). Les frais de station valent exactement nutrition x tarif, y
 //  compris pour les recettes a artefact dont la valeur ne suit pas 2^tier.
 // ---------------------------------------------------------------------------
+// Une recette sans categorie de bonus recevrait silencieusement le taux de base :
+// on prefere faire echouer la generation, quitte a ajouter un repli explicite.
+const sansBonus = [];
+
 function slimRecipe(r, classe) {
   const o = {
     id: r.id,
@@ -155,6 +226,8 @@ function slimRecipe(r, classe) {
     o.famille = classe.famille;
     o.lignee = classe.lignee;
     if (classe.ligne) o.ligne = classe.ligne;
+    o.bonusCategorie = categorieBonus(r.id);
+    if (!o.bonusCategorie) sansBonus.push(r.id);
   }
   return o;
 }
@@ -190,6 +263,111 @@ while (stack.length) {
 }
 
 // ---------------------------------------------------------------------------
+//  Complement depuis le wiki
+//
+//  Les dumps Jaccak datent de juin 2026, le wiki d'aout : toute la ligne Royale
+//  et une partie des artefacts Crystal manquent aux premiers. On les ajoute.
+//
+//  Le wiki ne publie AUCUN identifiant machine (ses recettes ne connaissent que
+//  des noms anglais, materiaux compris), d'ou le passage systematique par
+//  noms_items.json. C'est la regle numero 7 du socle de connaissances Albion.
+// ---------------------------------------------------------------------------
+const idParNomEn = {};        // nom anglais -> identifiant, variantes enchantees comprises
+for (const x of wikiNoms) {
+  if (!x.nom_en || !x.unique_name) continue;
+  const l = idParNomEn[x.nom_en] || (idParNomEn[x.nom_en] = []);
+  l.push(x.unique_name);
+}
+// Un nom d'objet rend sa base ET ses 4 variantes enchantees. La base est celle
+// sans `@` ; pour un materiau enchante (« Uncommon Pine Planks »), le nom porte
+// deja la qualite et ne rend qu'un seul identifiant.
+function idDeNom(nom) {
+  const l = idParNomEn[nom];
+  if (!l) return null;
+  const bases = l.filter(i => !i.includes('@'));
+  if (bases.length === 1) return bases[0];
+  if (bases.length === 0 && l.length === 1) return l[0];
+  return null;   // ambigu : on prefere ne rien importer plutot que le mauvais objet
+}
+
+// La station n'est pas dans le wiki. On la deduit de ce que les recettes deja
+// connues utilisent pour la meme sous-categorie : aucune supposition, juste une
+// generalisation de ce que les dumps disent deja.
+const stationParSousCat = {};
+for (const { recette } of cibles) {
+  const it = wikiParId[recette.id.split('@')[0]];
+  if (it && it.shop_subcategory) stationParSousCat[it.shop_subcategory] = recette.station;
+}
+
+const dejaConnu = new Set(Object.keys(includedRecipes));
+const importes = [];
+const rejets = { nomAmbigu: [], materiauIrresolu: [], sansFiche: [], horsPerimetre: 0 };
+
+for (const rw of wikiRecettes) {
+  const base = idDeNom(rw.item);
+  if (!base) { rejets.nomAmbigu.push(rw.item); continue; }
+  const ench = rw.enchantement || 0;
+  const id = ench > 0 ? `${base}@${ench}` : base;
+  if (dejaConnu.has(id)) continue;
+
+  const it = wikiParId[base];
+  if (!it) { rejets.sansFiche.push(rw.item); continue; }
+  // Montures et mobilier sortent du perimetre de ce calculateur.
+  if (!PAR_CATEGORIE[it.shop_category] && !SOUS_CATEGORIE[it.shop_subcategory]) {
+    rejets.horsPerimetre++; continue;
+  }
+  const bonus = categorieBonus(id);
+  if (!bonus) { rejets.sansFiche.push(rw.item); continue; }
+
+  const ing = [];
+  let manque = null;
+  for (const m of (rw.ingredients || [])) {
+    const mid = idDeNom(m.materiau);
+    if (!mid) { manque = m.materiau; break; }
+    const mt = parseInt(mid.slice(1), 10) || 0;
+    const me = (mid.match(/@(\d)/) || [, 0])[1];
+    ing.push({ id: mid, tier: mt, enchantment: +me, quantity: m.quantite });
+  }
+  if (manque) { rejets.materiauIrresolu.push(rw.item + ' : ' + manque); continue; }
+  if (!ing.length) continue;
+
+  const slot = { Head: 'tete', Chest: 'poitrine', Shoes: 'pieds', Cape: 'cape', Bag: 'sac' };
+  const categorie = it.shop_category === 'gathering' ? 'recolte'
+    : it.shop_category === 'weapons' ? 'arme'
+    : it.shop_category === 'offhands' ? 'arme_secondaire'
+    : slot[it.equipment_slot] || 'arme';
+  const ligne = (it.shop_subcategory || '').startsWith('plate_') ? 'plaque'
+    : (it.shop_subcategory || '').startsWith('leather_') ? 'cuir'
+    : (it.shop_subcategory || '').startsWith('cloth_') ? 'tissu' : null;
+  const suffixe = base.split('@')[0].split('_').pop();
+
+  const rec = {
+    id,
+    station: stationParSousCat[it.shop_subcategory] || 'warriors_forge',
+    tier: it.tier || parseInt(base.slice(1), 10) || 0,
+    enchantment: ench,
+    quantity: 1,
+    // La valeur d'objet du wiki redonne exactement la nutrition des dumps
+    // (relation verifiee sur 1 191 objets) : nutrition = item_value x 0,1125 / 100.
+    nutrition: (it.item_value || 0) * 0.001125 * Math.pow(2, ench),
+    excludeFromRRR: ing.filter(i => i.id.includes('ARTEFACT')).map(i => i.id),
+    ingredients: ing,
+    categorie,
+    famille: it.shop_subcategory,
+    lignee: LIGNEES_ARTEFACT.has(suffixe) ? suffixe : 'commun',
+    bonusCategorie: bonus,
+    source: 'wiki',
+  };
+  if (ligne) rec.ligne = ligne;
+
+  includedRecipes[id] = rec;
+  dejaConnu.add(id);
+  referencedItems.add(id);
+  for (const i of ing) referencedItems.add(i.id);
+  importes.push(id);
+}
+
+// ---------------------------------------------------------------------------
 //  Fonderie d'artefacts : runeQty unites de runeId -> 1 artefact au choix.
 //  Aplati en { artefactId: { runeId, runeQty, tier } } pour un acces direct.
 // ---------------------------------------------------------------------------
@@ -213,12 +391,20 @@ for (const id of Object.keys(artefacts)) {
 //  Un id enchante (T6_METALBAR_LEVEL2@2) a sa propre entree ; sinon on retombe
 //  sur l'id de base.
 // ---------------------------------------------------------------------------
+// Repli sur le wiki pour les objets que les dumps de juin ne connaissent pas
+// encore : ce sont precisement ceux qu'on vient d'importer.
+const nomsWikiParId = {};
+for (const x of wikiNoms) if (x.unique_name) nomsWikiParId[x.unique_name] = x;
+
 const outNames = {};
 let missingNames = 0;
 for (const id of referencedItems) {
   const n = names[id] || names[id.split('@')[0]];
-  if (n) outNames[id] = { fr: n['FR-FR'] || n['EN-US'] || id, en: n['EN-US'] || id };
-  else { outNames[id] = { fr: id, en: id }; missingNames++; }
+  if (n) { outNames[id] = { fr: n['FR-FR'] || n['EN-US'] || id, en: n['EN-US'] || id }; continue; }
+  const w = nomsWikiParId[id] || nomsWikiParId[id.split('@')[0]];
+  if (w) { outNames[id] = { fr: w.nom_fr || w.nom_en || id, en: w.nom_en || id }; continue; }
+  outNames[id] = { fr: id, en: id };
+  missingNames++;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,13 +449,43 @@ fs.writeFileSync(OUT, JSON.stringify(out));
 const parCategorie = {};
 for (const r of recipes) if (r.categorie) parCategorie[r.categorie] = (parCategorie[r.categorie] || 0) + 1;
 
+const affichables = recipes.filter(r => r.categorie).length;
+const parVille = {};
+for (const r of recipes) {
+  if (!r.bonusCategorie) continue;
+  const v = wikiVilles.bonus_craft_par_categorie[r.bonusCategorie] || '(aucune)';
+  parVille[v] = (parVille[v] || 0) + 1;
+}
+
 console.log('--- Donnees generees ---');
-console.log('Recettes affichables     :', nbCibles);
+console.log('Recettes affichables     :', affichables, '(' + nbCibles + ' des dumps + ' + importes.length + ' du wiki)');
 for (const [k, v] of Object.entries(parCategorie).sort((a, b) => b[1] - a[1])) {
   console.log('   ' + (k + '                ').slice(0, 16), v);
 }
-console.log('Sous-recettes (chaine)   :', recipes.length - nbCibles);
+console.log('Sous-recettes (chaine)   :', recipes.length - affichables);
 console.log('Recettes totales         :', recipes.length);
 console.log('Artefacts a la fonderie  :', Object.keys(artefacts).length);
 console.log('Items nommes             :', Object.keys(outNames).length, '(' + missingNames + ' sans nom officiel)');
+
+console.log('--- Bonus de fabrication, par ville bonifiante ---');
+for (const [v, n] of Object.entries(parVille).sort((a, b) => b[1] - a[1])) {
+  console.log('   ' + (v + '              ').slice(0, 15), n, 'recettes');
+}
+
+console.log('--- Import wiki ---');
+console.log('   importees              :', importes.length);
+console.log('   hors perimetre         :', rejets.horsPerimetre, '(montures, mobilier)');
+if (rejets.nomAmbigu.length) console.log('   nom non resolu         :', new Set(rejets.nomAmbigu).size, 'ex:', rejets.nomAmbigu[0]);
+if (rejets.sansFiche.length) console.log('   sans fiche objet       :', new Set(rejets.sansFiche).size, 'ex:', rejets.sansFiche[0]);
+if (rejets.materiauIrresolu.length) console.log('   materiau non resolu    :', new Set(rejets.materiauIrresolu).size, 'ex:', rejets.materiauIrresolu[0]);
+
 console.log('Taille du fichier        :', (fs.statSync(OUT).size / 1024 / 1024).toFixed(2), 'Mo ->', OUT);
+
+// Une recette d'equipement sans categorie de bonus prendrait le taux de base sans
+// que rien ne le signale. On refuse de livrer un fichier dans cet etat.
+if (sansBonus.length) {
+  console.error('\nECHEC : ' + sansBonus.length + ' recettes sans categorie de bonus de ville.');
+  console.error('Ajouter un repli dans categorieBonus(). Exemples :');
+  sansBonus.slice(0, 10).forEach(id => console.error('   ' + id));
+  process.exit(1);
+}
