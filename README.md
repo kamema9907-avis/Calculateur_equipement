@@ -42,13 +42,13 @@ accès en un tap.
 Les appels à l'API de prix fonctionnent depuis Pages (CORS autorisé, tout en HTTPS).
 
 Pages sert la branche `main` à la racine. Le développement se fait sur la branche de
-version en cours (`version-3`) ; pour publier une amélioration :
+version en cours (`version-4`) ; pour publier une amélioration :
 
 ```
 git checkout main
-git merge version-3
+git merge version-4
 git push
-git checkout version-3
+git checkout version-4
 ```
 
 Le site se met à jour tout seul 30 à 60 secondes après le push.
@@ -56,16 +56,16 @@ Le site se met à jour tout seul 30 à 60 secondes après le push.
 ### Clore une version et ouvrir la suivante
 
 ```
-git tag -a version-3 -m "Version 3 — description"
-git branch version-4 refs/heads/version-3
-git checkout version-4
-git push origin refs/tags/version-3:refs/tags/version-3
-git push -u origin refs/heads/version-4:refs/heads/version-4
+git tag -a version-4 -m "Version 4 — description"
+git branch version-5 refs/heads/version-4
+git checkout version-5
+git push origin refs/tags/version-4:refs/tags/version-4
+git push -u origin refs/heads/version-5:refs/heads/version-5
 ```
 
 ⚠️ Les refspecs complets (`refs/heads/…`, `refs/tags/…`) sont **nécessaires** : chaque
-version porte une branche et un tag de même nom, et `git branch version-4 version-3`
-échoue alors avec *ambiguous object name*, tout comme `git push origin version-3`
+version porte une branche et un tag de même nom, et `git branch version-5 version-4`
+échoue alors avec *ambiguous object name*, tout comme `git push origin version-4`
 échoue avec *src refspec matches more than one*.
 
 ---
