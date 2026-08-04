@@ -14,6 +14,8 @@ import * as V from './villes.js';
 import * as M from './moteur.js';
 import * as Mk from './marche.js';
 import * as D from './debouches.js';
+import * as Inv from './inventaire.js';
+import * as Sol from './solveur.js';
 
 const { createApp, reactive, ref, computed, watch, onMounted } = window.Vue;
 
@@ -138,13 +140,39 @@ const app = createApp({
       parts: { 1: 68.9, 2: 25, 3: 5, 4: 1.1, 5: 0.1 },
     });
 
+    // ---- Inventaire ----
+    const stock = reactive(Inv.chargerStock());
+    const inv = reactive({
+      // Un seul poste de silver : il couvre les achats ET les frais de station,
+      // que la banque ne fournit jamais. Un capital a zero interdit donc tout
+      // craft, meme avec une banque pleine — c'est le jeu, pas un bug.
+      capital: 5000000,
+      focus: 30000,            // plafond du jeu
+      efficaciteFocus: 0,
+      villeBase: 'Martlock',
+      nbVillesMax: 3,
+      partVolume: 10,
+      // Sans ce garde-fou, le solveur depense tout le capital sur l'objet le
+      // plus rentable du jeu et laisse la banque intacte : sur un stock reel,
+      // 99 % du stock dormait pendant qu'il achetait des sceaux royaux. C'est
+      // le travail de l'onglet Tableau, pas de celui-ci.
+      exigerBanque: true,
+    });
+    const plan = ref(null);
+    const planCharge = ref(false);
+
     // ---- Persistance ----
     try {
       const sauv = JSON.parse(localStorage.getItem(CLE_REGLAGES) || 'null');
-      if (sauv) { Object.assign(f, sauv.f || {}); Object.assign(r, sauv.r || {}); }
+      if (sauv) {
+        Object.assign(f, sauv.f || {});
+        Object.assign(r, sauv.r || {});
+        Object.assign(inv, sauv.inv || {});
+      }
     } catch { /* reglages corrompus : on garde les defauts */ }
-    watch([f, r], () => {
-      try { localStorage.setItem(CLE_REGLAGES, JSON.stringify({ f, r })); } catch {}
+    watch(stock, () => Inv.sauverStock(stock), { deep: true });
+    watch([f, r, inv], () => {
+      try { localStorage.setItem(CLE_REGLAGES, JSON.stringify({ f, r, inv })); } catch {}
     }, { deep: true });
 
     // ---- Chargement du catalogue ----
@@ -459,8 +487,11 @@ const app = createApp({
     }
 
     // ---- Panneau de detail ----
+    // L'arbre de cout doit refleter le contexte de l'onglet ouvert : depuis
+    // « Ma banque », c'est le bonus de la ville de base qui s'applique, pas
+    // celui du reglage global.
     function decomposerRecette(rec) {
-      return M.decomposer(rec, contexte(), forcees);
+      return M.decomposer(rec, onglet.value === 'inventaire' ? ctxInventaire() : contexte(), forcees);
     }
     partage.decomposer = decomposerRecette;
     partage.choisirVoie = (recetteId, ingId, methode) => {
@@ -485,6 +516,143 @@ const app = createApp({
       const rec = donnees.byId[detail.value.id];
       const d = decomposerRecette(rec);
       return { lignes: d.lignes, taux: d.taux, frais: d.frais, matieres: d.matieres, cout: d.cost };
+    });
+
+    // ========================= ONGLET INVENTAIRE =========================
+
+    // Les lignes de saisie : un tableau par matiere, tiers en lignes,
+    // enchantements en colonnes. Seuls les tiers coches sont rendus, sinon la
+    // page fait 400 champs et personne ne la remplit deux fois.
+    function grille(types) {
+      return types.map(type => ({
+        type, label: Inv.LIBELLES[type],
+        lignes: stock.tiers.map(t => ({
+          tier: t,
+          cases: stock.enchantements.map(e => ({
+            id: Inv.idRessource(type, t, e), ench: e,
+          })),
+        })),
+      }));
+    }
+    const grilleBrut = computed(() => grille(Inv.TYPES_BRUTS));
+    const grilleRaffine = computed(() => grille(Inv.TYPES_RAFFINES));
+    const totalInventaire = computed(() => Inv.totalStock(stock));
+
+    function ctxInventaire() {
+      return M.creerContexte({
+        byId: donnees.byId, artefacts: donnees.artefacts, prices: prix, manual: {},
+        villesAchat: f.villesAchat,
+        villeRaffinage: inv.villeBase, villeFabrication: inv.villeBase,
+        tableVilles: table,
+        focusRaffinage: false, focusFabrication: false,   // le focus est budgete, pas coche
+        eventBonus: r.eventBonus, tarifStation: r.tarifStation,
+        autoriserRaffinage: true, autoriserArtefact: r.autoriserArtefact,
+        maxAgeH: f.maxAgeH || null,
+      });
+    }
+
+    // Le plan a besoin des prix ET des volumes des candidats. Le stock borne
+    // naturellement l'ensemble, ce qui rend l'historique abordable : sans ce
+    // filtre il faudrait plus de 300 requetes.
+    async function calculerPlan(forcer = false) {
+      if (!pret.value || chargement.value) return;
+      if (totalInventaire.value <= 0) {
+        erreur.value = "Ta banque est vide : saisis au moins une ressource.";
+        return;
+      }
+      chargement.value = true; erreur.value = ''; progres.value = 0;
+      try {
+        const cands = Sol.candidats(donnees.recipes, stock, donnees.byId);
+        if (!cands.length) {
+          erreur.value = "Aucune recette ne consomme ce que tu as en banque.";
+          return;
+        }
+        const ids = idsATarifer(cands);
+        statut.value = `Prix de ${C.fmt(ids.length)} objets…`;
+        const { data: px } = await Mk.chargerPrix(ids, V.TOUS_LIEUX, {
+          qualites: [1], forcer, cle: 'prix-inventaire',
+          onProgress: (fait, total) => {
+            progres.value = Math.round(fait / total * 60);
+            statut.value = `Prix ${fait}/${total}…`;
+          },
+        });
+        prix = px;
+
+        statut.value = 'Volumes…';
+        const cibles = cands.map(x => x.id);
+        const { data: h } = await Mk.chargerHistorique(cibles, V.TOUS_LIEUX, {
+          qualites: [1], forcer, cle: 'histo-inventaire',
+          onProgress: (fait, total) => {
+            progres.value = 60 + Math.round(fait / total * 40);
+            statut.value = `Volumes ${fait}/${total}…`;
+          },
+        });
+        histo = h;
+
+        plan.value = Sol.resoudre(cands, stock, ctxInventaire(), prix, histo, {
+          capital: inv.capital, focus: inv.focus, efficaciteFocus: inv.efficaciteFocus,
+          partVolume: inv.partVolume / 100,
+          villesVente: f.villesVente, nbVillesMax: inv.nbVillesMax,
+          taxeOrdre: eco.value.ordre, taxeInstant: eco.value.instant,
+          undercut: r.undercut / 100, parts: { 1: 1 }, maxAgeH: f.maxAgeH || null,
+          exigerBanque: inv.exigerBanque,
+        });
+        planCharge.value = true;
+        versionPrix.value++;
+        statut.value = `${cands.length} recettes examinées · `
+          + `${plan.value.retenues.length} retenues · ${new Date().toLocaleTimeString('fr-FR')}`;
+      } catch (e) {
+        erreur.value = 'Calcul du plan interrompu (' + e.message + ').';
+      } finally { chargement.value = false; progres.value = 0; }
+    }
+
+    // Le panneau de detail attend la forme des lignes de l'onglet Tableau.
+    // Les lignes du solveur portent d'autres noms : on adapte plutot que de
+    // dupliquer tout le panneau.
+    function ouvrirDepuisPlan(l) {
+      ouvrir({
+        id: l.id, tier: l.recette.tier, ench: l.recette.enchantment,
+        station: l.recette.station, lignee: l.recette.lignee,
+        cout: l.coutU, revenu: l.revenuU, profit: l.profitU, marge: l.marge,
+        qualite: l.meilleur.qualite, meilleur: l.meilleur, parQualite: l.debouches,
+        vol: l.meilleur.vol, age: l.meilleur.ageH, nom: nom(l.id),
+      });
+    }
+
+    function viderInventaire() {
+      Object.keys(stock.quantites).forEach(k => delete stock.quantites[k]);
+      plan.value = null;
+      planCharge.value = false;
+    }
+
+    // Le reste en banque, uniquement ce qui n'a pas ete consomme.
+    const resteEnBanque = computed(() => {
+      if (!plan.value) return [];
+      return Object.entries(plan.value.stockRestant)
+        .filter(([, v]) => v > 0.5)
+        .map(([id, v]) => ({ id, qte: v, nom: nom(id) }))
+        .sort((a, b) => b.qte - a.qte);
+    });
+
+    // Toutes les courses du plan, regroupees par ville d'achat.
+    const achatsParVille = computed(() => {
+      if (!plan.value) return [];
+      const g = {};
+      for (const l of plan.value.retenues) {
+        for (const a of l.achats) {
+          const cle = (a.ville || '?') + '|' + a.id;
+          if (!g[cle]) g[cle] = { ville: a.ville || '?', id: a.id, qte: 0, cout: 0 };
+          g[cle].qte += a.qte; g[cle].cout += a.cout;
+        }
+      }
+      const parVille = {};
+      for (const x of Object.values(g)) (parVille[x.ville] = parVille[x.ville] || []).push(x);
+      return Object.entries(parVille)
+        .map(([ville, items]) => ({
+          ville, items: items.sort((a, b) => b.cout - a.cout),
+          cout: items.reduce((a, b) => a + b.cout, 0),
+        }))
+        .sort((a, b) => b.cout - a.cout);
     });
 
     // ---- Table des bonus de ville ----
@@ -536,6 +704,10 @@ const app = createApp({
       meilleurProfit, partInstant, nbBlackMarket, nbAberrants, resumeRejets,
       cartes, plafondMarge, decomposition, nbNonVerif,
       fabricationParVille, poidsCategories,
+      // inventaire
+      stock, inv, plan, planCharge, grilleBrut, grilleRaffine, totalInventaire,
+      calculerPlan, viderInventaire, resteEnBanque, achatsParVille, ouvrirDepuisPlan,
+      TIERS_STOCK: C.TIERS, LIBELLES_MAT: Inv.LIBELLES,
       // actions
       balayer, analyseFine, viderLeCache, trier, fleche, ouvrir, majTable,
       zoomer, estSelection, bulleCase, styleCase, imgErr,

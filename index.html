@@ -231,11 +231,12 @@
   <div class="tabs">
     <div class="tab" :class="{on:onglet==='reperage'}" @click="onglet='reperage'">🗺️ Repérage</div>
     <div class="tab" :class="{on:onglet==='tableau'}" @click="onglet='tableau'">📊 Tableau</div>
+    <div class="tab" :class="{on:onglet==='inventaire'}" @click="onglet='inventaire'">🎒 Ma banque</div>
     <div class="tab" :class="{on:onglet==='reglages'}" @click="onglet='reglages'">⚙️ Réglages</div>
   </div>
 
   <!-- ============ Filtres (communs aux vues Repérage et Tableau) ============ -->
-  <div class="filtres" v-if="onglet!=='reglages'">
+  <div class="filtres" v-if="onglet!=='reglages' && onglet!=='inventaire'">
     <div class="grille-filtres">
 
       <div class="champ pleine">
@@ -345,7 +346,7 @@
   </div>
 
   <!-- ============ Tuiles ============ -->
-  <div class="tuiles" v-if="onglet!=='reglages' && prixCharges">
+  <div class="tuiles" v-if="onglet!=='reglages' && onglet!=='inventaire' && prixCharges">
     <div class="tuile">
       <div class="k">Opportunités</div>
       <div class="v">{{ fmt(lignes.length) }}</div>
@@ -489,6 +490,252 @@
         <button class="plat" v-if="lignesAffichees.length < lignes.length" @click="limite += 100">
           Afficher 100 de plus
         </button>
+      </div>
+    </template>
+  </template>
+
+  <!-- ============================== MA BANQUE ============================== -->
+  <template v-if="onglet==='inventaire'">
+
+    <div class="filtres">
+      <div class="grille-filtres">
+        <div class="champ">
+          <span class="lab">Ma ville de base <span style="text-transform:none;font-weight:400">(où je fabrique)</span></span>
+          <select v-model="inv.villeBase">
+            <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </div>
+        <div class="champ">
+          <span class="lab">Silver disponible</span>
+          <input type="number" v-model.number="inv.capital" min="0" step="100000">
+          <span class="statut">Couvre les achats <b style="color:var(--txt)">et les frais de station</b>,
+            que ta banque ne fournit jamais.</span>
+        </div>
+        <div class="champ">
+          <span class="lab">Focus disponible (points)</span>
+          <input type="number" v-model.number="inv.focus" min="0" max="30000" step="1000">
+        </div>
+        <div class="champ">
+          <span class="lab">Efficacité de focus au raffinage</span>
+          <input type="number" v-model.number="inv.efficaciteFocus" min="0" max="40000" step="1000">
+          <span class="statut">Divise le coût par deux tous les 10 000 points.</span>
+        </div>
+        <div class="champ">
+          <span class="lab">Villes de vente maximum</span>
+          <input type="number" v-model.number="inv.nbVillesMax" min="1" max="8">
+        </div>
+        <div class="champ">
+          <span class="lab">Part du volume quotidien captée (%)</span>
+          <input type="number" v-model.number="inv.partVolume" min="1" max="100" step="1">
+        </div>
+        <div class="champ">
+          <span class="lab">Périmètre</span>
+          <label class="toggle"><input type="checkbox" v-model="inv.exigerBanque">
+            Seulement ce qui consomme ma banque</label>
+          <span class="statut">Décoché, le plan peut proposer des objets entièrement achetés :
+            il maximise alors le profit de ton silver, pas l'écoulement de ton stock.</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button @click="calculerPlan(false)" :disabled="chargement || !pret || totalInventaire<=0">
+          Que fabriquer avec ça ?
+        </button>
+        <button class="plat" @click="viderInventaire()" :disabled="totalInventaire<=0">Vider la banque</button>
+        <div v-if="chargement" class="barre-progres"><i :style="{width: progres+'%'}"></i></div>
+        <span class="statut">{{ statut }}</span>
+      </div>
+      <div class="statut" style="margin-top:8px;line-height:1.5">
+        Ta banque est valorisée au <b style="color:var(--txt)">prix de rachat du marché</b>, pas à zéro :
+        posséder 500 barres n'est pas gratuit, tu pourrais les revendre. Elle ne change donc pas le coût
+        d'un objet, elle réduit le silver à sortir. Le plan classe par
+        <b style="color:var(--txt)">profit par silver de matière engagée</b>, pas par marge : avec un stock
+        fini, c'est ce qui décide.
+      </div>
+    </div>
+
+    <!-- ---- Les deux grilles ---- -->
+    <div class="carte" style="margin-bottom:12px">
+      <h3>
+        <span>🎒 Ce que j'ai en banque</span>
+        <span class="n">{{ fmt(totalInventaire) }} unités saisies</span>
+      </h3>
+      <div class="carte-corps">
+        <div class="champ" style="margin-bottom:12px">
+          <span class="lab">Niveaux affichés</span>
+          <div class="cases">
+            <label v-for="t in TIERS_STOCK" :key="t">
+              <input type="checkbox" :value="t" v-model="stock.tiers"> T{{ t }}
+            </label>
+          </div>
+          <span class="lab" style="margin-top:8px">Enchantements affichés</span>
+          <div class="cases">
+            <label v-for="e in ENCHANTEMENTS" :key="e">
+              <input type="checkbox" :value="e" v-model="stock.enchantements"> .{{ e }}
+            </label>
+          </div>
+        </div>
+
+        <div class="reglages" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+          <div v-for="g in grilleRaffine" :key="g.type">
+            <div class="ville-head" style="border-radius:6px 6px 0 0"><b>{{ g.label }}</b>
+              <span class="chiffres">raffiné</span></div>
+            <table class="rg"><tbody>
+              <tr v-for="l in g.lignes" :key="l.tier">
+                <td style="width:34px">T{{ l.tier }}</td>
+                <td v-for="c in l.cases" :key="c.id" style="padding:3px">
+                  <input type="number" min="0" step="1" placeholder="0"
+                         v-model.number="stock.quantites[c.id]"
+                         :title="c.id" style="padding:4px 5px;font-size:12px">
+                </td>
+              </tr>
+            </tbody></table>
+          </div>
+
+          <div v-for="g in grilleBrut" :key="g.type">
+            <div class="ville-head" style="border-radius:6px 6px 0 0"><b>{{ g.label }}</b>
+              <span class="chiffres">brut</span></div>
+            <table class="rg"><tbody>
+              <tr v-for="l in g.lignes" :key="l.tier">
+                <td style="width:34px">T{{ l.tier }}</td>
+                <td v-for="c in l.cases" :key="c.id" style="padding:3px">
+                  <input type="number" min="0" step="1" placeholder="0"
+                         v-model.number="stock.quantites[c.id]"
+                         :title="c.id" style="padding:4px 5px;font-size:12px">
+                </td>
+              </tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div class="statut" style="margin-top:10px">
+          Colonnes = enchantements ({{ stock.enchantements.map(e=>'.'+e).join(' · ') }}).
+          Tout est mémorisé : tu ne saisis qu'une fois, puis tu corriges.
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Le plan ---- -->
+    <div v-if="!planCharge" class="vide-msg">
+      Saisis ton stock puis lance le calcul.
+    </div>
+    <template v-else-if="plan">
+      <div class="tuiles">
+        <div class="tuile">
+          <div class="k">Profit du plan</div>
+          <div class="v pos">{{ fmtM(plan.totalProfit) }}</div>
+          <div class="n">{{ plan.nbLignes }} objet(s) à fabriquer</div>
+        </div>
+        <div class="tuile">
+          <div class="k">Silver à sortir</div>
+          <div class="v">{{ fmtM(plan.capitalUtilise) }}</div>
+          <div class="n">achats + frais de station</div>
+        </div>
+        <div class="tuile">
+          <div class="k">Valeur prise en banque</div>
+          <div class="v">{{ fmtM(plan.valeurBanqueUtilisee) }}</div>
+          <div class="n">au prix de rachat du marché</div>
+        </div>
+        <div class="tuile">
+          <div class="k">Focus utilisé</div>
+          <div class="v">{{ fmt(inv.focus - plan.focusRestant) }}</div>
+          <div class="n">reste {{ fmt(plan.focusRestant) }} points</div>
+        </div>
+      </div>
+
+      <div class="bandeau avert" v-if="plan.retenues.some(l=>l.reventeMieux)">
+        ⚠ Certaines lignes rapportent <b>moins que revendre la matière telle quelle</b>.
+        Elles sont marquées en rouge dans le tableau.
+      </div>
+
+      <div class="carte" style="margin-bottom:12px">
+        <h3><span>🔨 À fabriquer</span>
+          <span class="n">{{ plan.nbCandidats }} recettes évaluées · classement par {{ plan.strategie }}</span></h3>
+        <div class="carte-corps" style="padding:0">
+          <table class="tb">
+            <thead><tr>
+              <th class="g">Objet</th><th>Quantité</th><th>Profit</th>
+              <th>Part banque</th><th class="g">Où vendre</th><th>Focus</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="l in plan.retenues" :key="l.id" @click="ouvrirDepuisPlan(l)">
+                <td class="g">
+                  <div class="objet">
+                    <img :src="rendu(l.id)" loading="lazy" @error="imgErr($event,l.id)" alt="">
+                    <div>
+                      <div class="nom">{{ nom(l.id) }}
+                        <span v-if="l.reventeMieux" class="neg" style="font-size:11px">· revente meilleure</span>
+                      </div>
+                      <div class="id">
+                        <span class="pastille t">T{{ l.recette.tier }}{{ l.recette.enchantment ? '.'+l.recette.enchantment : '' }}</span>
+                        {{ l.id }}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td data-lab="Quantité"><b>{{ fmt(l.q) }}</b></td>
+                <td data-lab="Profit" class="pos">{{ signe(l.profit) }}</td>
+                <td data-lab="Part banque"
+                    :title="fmtM(l.valeurBanque) + ' pris en banque, ' + fmtM(l.coutAchat) + ' acheté'">
+                  {{ Math.round(l.partBanque * 100) }} %
+                </td>
+                <td class="g" data-lab="Où vendre">
+                  <span v-for="d in l.repartition" :key="d.lieu" class="canal"
+                        :class="d.bm ? 'bm':'ville'" style="margin-right:4px">
+                    {{ d.bm ? '🏴' : '🏛️' }} {{ fmt(d.qte) }} × {{ d.lieu }}
+                  </span>
+                </td>
+                <td data-lab="Focus">{{ l.focusUtilise > 0 ? fmt(l.focusUtilise) : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="!plan.retenues.length" class="vide-msg">
+            Rien de rentable avec ce stock.<br>
+            <span style="font-size:12px">{{ Object.entries(plan.rejets).map(([m,n])=>n+' × '+m).join(' · ') }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="reglages">
+        <div class="carte" v-if="achatsParVille.length">
+          <h3><span>🛒 À acheter</span><span class="n">ce que la banque ne couvre pas</span></h3>
+          <div class="carte-corps">
+            <div v-for="g in achatsParVille" :key="g.ville" style="margin-bottom:10px">
+              <div class="ville-head"><b>{{ g.ville }}</b><span class="chiffres">{{ fmtM(g.cout) }}</span></div>
+              <table class="rg"><tbody>
+                <tr v-for="a in g.items" :key="a.id">
+                  <td>{{ nom(a.id) }}</td>
+                  <td style="text-align:right">{{ fmt(a.qte) }}</td>
+                  <td style="text-align:right">{{ fmtM(a.cout) }}</td>
+                </tr>
+              </tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <div class="carte" v-if="resteEnBanque.length">
+          <h3><span>📦 Ce qui reste en banque</span><span class="n">{{ resteEnBanque.length }} ressource(s)</span></h3>
+          <div class="carte-corps">
+            <table class="rg"><tbody>
+              <tr v-for="x in resteEnBanque.slice(0,20)" :key="x.id">
+                <td>{{ x.nom }}</td>
+                <td style="text-align:right">{{ fmt(x.qte) }}</td>
+              </tr>
+            </tbody></table>
+            <div class="statut" style="margin-top:8px">
+              Rien n'a pu en être tiré : soit aucune recette ne les consomme, soit le marché
+              n'absorbait plus, soit le silver manquait.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="legend" style="margin-top:12px;line-height:1.6">
+        <b style="color:var(--txt)">Ce que ce plan ne dit pas.</b>
+        Le coût en focus de la <b>fabrication</b> n'est publié nulle part : seul le raffinage est
+        budgété. Le profit annoncé est donc un <b>plancher</b>, que ton focus de craft améliorera.
+        Le transport entre ta ville de base et les villes de vente n'est pas compté.
+        Et l'API ne publie que le prix de la première unité du carnet d'ordres : acheter en masse
+        fera glisser tes prix d'achat.
       </div>
     </template>
   </template>

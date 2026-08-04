@@ -102,6 +102,63 @@ Black Market l'achète 102 483.
 
 ---
 
+## 🎒 L'onglet « Ma banque »
+
+Répond à une autre question que le reste de l'outil : non pas « quel objet a la
+meilleure marge » mais **« j'ai ça en banque, qu'est-ce que j'en fais ? »**
+
+Tu saisis ton stock, brut et raffiné, par niveau et par enchantement. Tout est
+mémorisé. Le solveur sort un plan : quoi fabriquer, en quelle quantité, où le vendre,
+ce qu'il reste à acheter, et ce qui dort encore en banque.
+
+### Le stock est valorisé au prix de rachat du marché, pas à zéro
+
+Posséder 500 barres n'est pas gratuit : tu pourrais les revendre. Les compter à zéro
+ferait fondre des barres T8 en objets qui valent moins que les barres, sans le signaler.
+
+Conséquence heureuse : **le coût d'un objet ne dépend pas de ce que tu possèdes**. La
+banque ne change pas la valeur des choses, elle réduit le silver à sortir. Le moteur de
+coût reste donc le même, et l'onglet n'ajoute qu'une couche d'allocation.
+
+### Ce que le plan optimise
+
+Avec un stock fini, la marge n'est plus le bon critère. Une hache à 40 % de marge
+consomme 20 barres, un casque à 25 % n'en consomme que 8 : avec 1 000 barres tu fais
+50 haches ou 125 casques, et c'est le profit **par barre** qui décide.
+
+Sauf qu'il y a **deux ressources rares** — ta banque et ton silver — et qu'aucun ratio
+unique ne sert les deux. Le solveur exécute donc les deux allocations et garde celle
+qui rapporte le plus. Le plan indique laquelle a gagné.
+
+### Quatre bornes sur chaque quantité
+
+| Borne | Pourquoi |
+|---|---|
+| Ce que la banque permet | directement, ou après raffinage de ta matière brute |
+| 10 % du volume quotidien, par marché | tu ne peux pas écouler plus que le marché n'absorbe |
+| Silver disponible | couvre les achats **et les frais de station** |
+| Focus disponible | budgété au raffinage, où le coût est connu |
+
+### Le garde-fou qui rend l'onglet utile
+
+Une ligne qui ne prend **rien** dans ta banque en est écartée par défaut. Sans ce
+filtre, le solveur dépense tout ton silver sur l'objet le plus rentable du jeu et laisse
+ton stock intact : sur un test réel, il achetait 5 M de sceaux royaux pendant que 99 %
+de la banque dormait. C'est le travail de l'onglet Tableau, pas de celui-ci. La case
+« Seulement ce qui consomme ma banque » permet de relâcher la contrainte.
+
+### Le focus
+
+Budgété **au raffinage seulement**, où le coût est publié (164 points pour une barre T6,
+×1,75 par tier et par enchantement, ×2 pour la pierre ; l'efficacité divise par deux
+tous les 10 000 points). Le raffinage continue **sans focus** une fois la réserve
+épuisée, à taux de base — comme en jeu.
+
+Le coût en focus de la **fabrication** n'est publié nulle part. Le plan la calcule donc
+sans focus, et le bénéfice annoncé est un **plancher**.
+
+---
+
 ## 🧮 Comment fonctionne le calcul
 
 ### Coût d'un ingrédient
@@ -297,6 +354,8 @@ js/villes.js             Villes et table des bonus, éditable et persistée
 js/moteur.js             Coût récursif : acheter / raffiner / fabriquer / fondre
 js/marche.js             API prix et historique, cache IndexedDB
 js/debouches.js          Les quatre canaux de vente, garde-fous, pondération qualité
+js/inventaire.js         Le stock : saisie, persistance, focus, puisage
+js/solveur.js            Allocation sous contraintes de l'onglet Ma banque
 js/app.js                État, filtres, vues
 data/equipment-data.json Données générées (2,9 Mo)
 scripts/build-data.js    Générateur depuis la librairie voisine
