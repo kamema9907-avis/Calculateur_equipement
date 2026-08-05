@@ -535,6 +535,42 @@
           <span class="statut">Décoché, le plan peut proposer des objets entièrement achetés :
             il maximise alors le profit de ton silver, pas l'écoulement de ton stock.</span>
         </div>
+
+        <div class="champ">
+          <span class="lab">Niveaux à fabriquer
+            <a class="raccourci" @click="inv.tiers=[...TIERS]">tous</a>
+            <a class="raccourci" @click="inv.tiers=[4,5,6,7,8]">4-8</a></span>
+          <div class="cases">
+            <label v-for="t in TIERS" :key="t"><input type="checkbox" :value="t" v-model="inv.tiers"> T{{ t }}</label>
+          </div>
+        </div>
+
+        <div class="champ">
+          <span class="lab">Enchantements à fabriquer
+            <a class="raccourci" @click="inv.ench=[...ENCHANTEMENTS]">tous</a>
+            <a class="raccourci" @click="inv.ench=[0]">.0</a></span>
+          <div class="cases">
+            <label v-for="e in ENCHANTEMENTS" :key="e"><input type="checkbox" :value="e" v-model="inv.ench"> .{{ e }}</label>
+          </div>
+        </div>
+
+        <div class="champ pleine">
+          <span class="lab">Villes où j'accepte de vendre
+            <span style="text-transform:none;font-weight:400">(le Black Market est toujours considéré en plus)</span>
+            <a class="raccourci" @click="inv.villesVente=[...VILLES]">toutes</a>
+            <a class="raccourci" @click="inv.villesVente=[inv.villeBase]">ma ville seule</a></span>
+          <div class="cases">
+            <label v-for="v in VILLES" :key="v"><input type="checkbox" :value="v" v-model="inv.villesVente"> {{ v }}</label>
+          </div>
+        </div>
+
+        <div class="champ pleine">
+          <span class="lab">Villes où j'accepte d'acheter ce qui me manque
+            <a class="raccourci" @click="inv.villesAchat=[...VILLES]">toutes</a></span>
+          <div class="cases">
+            <label v-for="v in VILLES" :key="v"><input type="checkbox" :value="v" v-model="inv.villesAchat"> {{ v }}</label>
+          </div>
+        </div>
       </div>
 
       <div class="actions">
@@ -618,7 +654,19 @@
     <div v-if="!planCharge" class="vide-msg">
       Saisis ton stock puis lance le calcul.
     </div>
-    <template v-else-if="plan">
+    <template v-else>
+      <div v-if="filtreElargi" class="bandeau avert">
+        ⚠ Tu as <b>élargi un filtre</b> depuis le dernier calcul. Les recettes qui viennent
+        d'entrer n'ont pas de prix chargé et sont écartées en silence.
+        <a @click="calculerPlan(false)">Relancer le calcul</a> pour les inclure.
+      </div>
+
+      <div v-if="!plan" class="vide-msg">
+        Tes filtres ne laissent passer aucune recette.<br>
+        <span style="font-size:12px">Recoche des niveaux ou des enchantements.</span>
+      </div>
+    </template>
+    <template v-if="planCharge && plan">
       <div class="tuiles">
         <div class="tuile">
           <div class="k">Profit du plan</div>
@@ -649,7 +697,9 @@
 
       <div class="carte" style="margin-bottom:12px">
         <h3><span>🔨 À fabriquer</span>
-          <span class="n">{{ plan.nbCandidats }} recettes évaluées · classement par {{ plan.strategie }}</span></h3>
+          <span class="n">{{ plan.nbCandidats }} recettes évaluées<template v-if="ecartesParFiltre">,
+            {{ fmt(ecartesParFiltre) }} écartées par tes filtres</template>
+            · classement par {{ plan.strategie }}</span></h3>
         <div class="carte-corps" style="padding:0">
           <table class="tb">
             <thead><tr>

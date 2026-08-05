@@ -152,6 +152,14 @@ const app = createApp({
       villeBase: 'Martlock',
       nbVillesMax: 3,
       partVolume: 10,
+      // Filtres du plan. Ils agissent AVANT la resolution, pas sur l'affichage :
+      // masquer des lignes deja servies laisserait des totaux faux et du stock
+      // immobilise sur ce qu'on ne voulait pas. En filtrant en amont, la banque
+      // et le silver se reportent sur ce qui reste.
+      tiers: [...C.TIERS],
+      ench: [...C.ENCHANTEMENTS],
+      villesVente: [...V.VILLES],
+      villesAchat: [...V.VILLES],
       // Sans ce garde-fou, le solveur depense tout le capital sur l'objet le
       // plus rentable du jeu et laisse la banque intacte : sur un stock reel,
       // 99 % du stock dormait pendant qu'il achetait des sceaux royaux. C'est
@@ -501,10 +509,13 @@ const app = createApp({
       versionPrix.value++;   // force le recalcul de la decomposition affichee
     };
 
-    function ouvrir(l) {
+    // `villes` est explicite : ouvert depuis l'onglet Ma banque, le panneau doit
+    // recalculer les debouches sur les villes de CET onglet, pas sur celles de
+    // la barre de filtres, qui y est masquee.
+    function ouvrir(l, villes = null) {
       selection.value = l.id;
-      const canaux = D.debouchesDe(prix[l.id], histoCharges.value ? histo[l.id] : null, {
-        villesVente: f.villesVente, qualite: l.qualite, undercut: r.undercut / 100,
+      const canaux = D.debouchesDe(prix[l.id], histo[l.id] || null, {
+        villesVente: villes || f.villesVente, qualite: l.qualite, undercut: r.undercut / 100,
         taxeOrdre: eco.value.ordre, taxeInstant: eco.value.instant, maxAgeH: f.maxAgeH || null,
       });
       detail.value = { ...l, canaux, station: donnees.byId[l.id].station };
@@ -541,7 +552,7 @@ const app = createApp({
     function ctxInventaire() {
       return M.creerContexte({
         byId: donnees.byId, artefacts: donnees.artefacts, prices: prix, manual: {},
-        villesAchat: f.villesAchat,
+        villesAchat: inv.villesAchat,
         villeRaffinage: inv.villeBase, villeFabrication: inv.villeBase,
         tableVilles: table,
         focusRaffinage: false, focusFabrication: false,   // le focus est budgete, pas coche
@@ -554,6 +565,33 @@ const app = createApp({
     // Le plan a besoin des prix ET des volumes des candidats. Le stock borne
     // naturellement l'ensemble, ce qui rend l'historique abordable : sans ce
     // filtre il faudrait plus de 300 requetes.
+    // Les candidats retenus par la banque, puis restreints par les filtres.
+    // Le filtrage se fait ICI, avant la resolution, et non a l'affichage :
+    // masquer des lignes deja servies laisserait des totaux faux et du stock
+    // immobilise sur ce qu'on ne voulait pas.
+    function candidatsFiltres() {
+      const tous = Sol.candidats(donnees.recipes, stock, donnees.byId);
+      const gardes = tous.filter(x =>
+        inv.tiers.includes(x.tier) && inv.ench.includes(x.enchantment));
+      return { tous, gardes, ecartesParFiltre: tous.length - gardes.length };
+    }
+
+    // Identifiants dont on a reellement charge un prix. Elargir un filtre fait
+    // entrer des recettes jamais tarifees, qui seraient rejetees en silence
+    // comme « cout inconnu » : on veut pouvoir le signaler.
+    let idsTarifes = new Set();
+
+    function optionsSolveur() {
+      return {
+        capital: inv.capital, focus: inv.focus, efficaciteFocus: inv.efficaciteFocus,
+        partVolume: inv.partVolume / 100,
+        villesVente: inv.villesVente, nbVillesMax: inv.nbVillesMax,
+        taxeOrdre: eco.value.ordre, taxeInstant: eco.value.instant,
+        undercut: r.undercut / 100, parts: { 1: 1 }, maxAgeH: f.maxAgeH || null,
+        exigerBanque: inv.exigerBanque,
+      };
+    }
+
     async function calculerPlan(forcer = false) {
       if (!pret.value || chargement.value) return;
       if (totalInventaire.value <= 0) {
@@ -562,9 +600,14 @@ const app = createApp({
       }
       chargement.value = true; erreur.value = ''; progres.value = 0;
       try {
-        const cands = Sol.candidats(donnees.recipes, stock, donnees.byId);
-        if (!cands.length) {
+        const { tous, gardes: cands } = candidatsFiltres();
+        if (!tous.length) {
           erreur.value = "Aucune recette ne consomme ce que tu as en banque.";
+          return;
+        }
+        if (!cands.length) {
+          erreur.value = "Tes filtres de niveau et d'enchantement ne laissent passer "
+            + "aucune des " + tous.length + " recettes que ta banque alimente.";
           return;
         }
         const ids = idsATarifer(cands);
@@ -588,15 +631,9 @@ const app = createApp({
           },
         });
         histo = h;
+        idsTarifes = new Set(ids);
 
-        plan.value = Sol.resoudre(cands, stock, ctxInventaire(), prix, histo, {
-          capital: inv.capital, focus: inv.focus, efficaciteFocus: inv.efficaciteFocus,
-          partVolume: inv.partVolume / 100,
-          villesVente: f.villesVente, nbVillesMax: inv.nbVillesMax,
-          taxeOrdre: eco.value.ordre, taxeInstant: eco.value.instant,
-          undercut: r.undercut / 100, parts: { 1: 1 }, maxAgeH: f.maxAgeH || null,
-          exigerBanque: inv.exigerBanque,
-        });
+        plan.value = Sol.resoudre(cands, stock, ctxInventaire(), prix, histo, optionsSolveur());
         planCharge.value = true;
         versionPrix.value++;
         statut.value = `${cands.length} recettes examinées · `
@@ -605,6 +642,29 @@ const app = createApp({
         erreur.value = 'Calcul du plan interrompu (' + e.message + ').';
       } finally { chargement.value = false; progres.value = 0; }
     }
+
+    // Rejoue la resolution sur les prix DEJA charges. Changer un filtre ne doit
+    // pas relancer quatre-vingts requetes : retrecir un filtre travaille sur un
+    // sous-ensemble deja tarife, et elargir est signale plutot que rejoue.
+    const filtreElargi = ref(false);
+    function resoudreDepuisMemoire() {
+      if (!planCharge.value || chargement.value) return;
+      const { gardes: cands } = candidatsFiltres();
+      filtreElargi.value = cands.some(x => !idsTarifes.has(x.id));
+      if (!cands.length) { plan.value = null; return; }
+      plan.value = Sol.resoudre(cands, stock, ctxInventaire(), prix, histo, optionsSolveur());
+    }
+
+    // Le delai groupe les clics : cocher six niveaux d'affilee ne doit declencher
+    // qu'une resolution.
+    let timerPlan = null;
+    watch(() => [inv.tiers, inv.ench, inv.villesVente, inv.villesAchat, inv.capital,
+      inv.focus, inv.efficaciteFocus, inv.nbVillesMax, inv.partVolume,
+      inv.exigerBanque, inv.villeBase], () => {
+      if (!planCharge.value) return;
+      clearTimeout(timerPlan);
+      timerPlan = setTimeout(resoudreDepuisMemoire, 250);
+    }, { deep: true });
 
     // Le panneau de detail attend la forme des lignes de l'onglet Tableau.
     // Les lignes du solveur portent d'autres noms : on adapte plutot que de
@@ -616,8 +676,16 @@ const app = createApp({
         cout: l.coutU, revenu: l.revenuU, profit: l.profitU, marge: l.marge,
         qualite: l.meilleur.qualite, meilleur: l.meilleur, parQualite: l.debouches,
         vol: l.meilleur.vol, age: l.meilleur.ageH, nom: nom(l.id),
-      });
+      }, inv.villesVente);
     }
+
+    // Combien de recettes les filtres de niveau et d'enchantement ecartent :
+    // sans ce chiffre, un filtre trop serre passe pour un marche vide.
+    const ecartesParFiltre = computed(() => {
+      void [inv.tiers, inv.ench, stock.quantites];
+      if (!pret.value || totalInventaire.value <= 0) return 0;
+      return candidatsFiltres().ecartesParFiltre;
+    });
 
     function viderInventaire() {
       Object.keys(stock.quantites).forEach(k => delete stock.quantites[k]);
@@ -707,6 +775,7 @@ const app = createApp({
       // inventaire
       stock, inv, plan, planCharge, grilleBrut, grilleRaffine, totalInventaire,
       calculerPlan, viderInventaire, resteEnBanque, achatsParVille, ouvrirDepuisPlan,
+      filtreElargi, ecartesParFiltre,
       TIERS_STOCK: C.TIERS, LIBELLES_MAT: Inv.LIBELLES,
       // actions
       balayer, analyseFine, viderLeCache, trier, fleche, ouvrir, majTable,

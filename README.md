@@ -139,6 +139,20 @@ qui rapporte le plus. Le plan indique laquelle a gagné.
 | Silver disponible | couvre les achats **et les frais de station** |
 | Focus disponible | budgété au raffinage, où le coût est connu |
 
+### Les filtres agissent avant la résolution, pas sur l'affichage
+
+Tu peux restreindre le plan par **ville de vente, niveau et enchantement**. Ces filtres
+ne masquent pas des lignes : ils écartent les recettes **avant** que le solveur ne
+travaille, si bien que ta banque et ton silver se reportent sur ce qui reste.
+
+L'écart n'est pas théorique. Sur un stock T5-T7 avec un capital serré, passer de « tous
+niveaux » à « T6 seul » fait monter la production T6 de **4 à 170 unités** : le capital
+qui partait en T5 et T7 revient au T6. Un filtrage d'affichage aurait continué d'afficher
+4, avec des totaux qui ne correspondaient plus aux lignes visibles.
+
+Élargir un filtre après un calcul fait entrer des recettes jamais tarifées. La page le
+signale plutôt que de les écarter en silence.
+
 ### Le garde-fou qui rend l'onglet utile
 
 Une ligne qui ne prend **rien** dans ta banque en est écartée par défaut. Sans ce
