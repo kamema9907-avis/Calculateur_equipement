@@ -232,11 +232,12 @@
     <div class="tab" :class="{on:onglet==='reperage'}" @click="onglet='reperage'">🗺️ Repérage</div>
     <div class="tab" :class="{on:onglet==='tableau'}" @click="onglet='tableau'">📊 Tableau</div>
     <div class="tab" :class="{on:onglet==='inventaire'}" @click="onglet='inventaire'">🎒 Ma banque</div>
+    <div class="tab" :class="{on:onglet==='fiche'}" @click="onglet='fiche'">🔎 Fiche objet</div>
     <div class="tab" :class="{on:onglet==='reglages'}" @click="onglet='reglages'">⚙️ Réglages</div>
   </div>
 
   <!-- ============ Filtres (communs aux vues Repérage et Tableau) ============ -->
-  <div class="filtres" v-if="onglet!=='reglages' && onglet!=='inventaire'">
+  <div class="filtres" v-if="onglet!=='reglages' && onglet!=='inventaire' && onglet!=='fiche'">
     <div class="grille-filtres">
 
       <div class="champ pleine">
@@ -346,7 +347,7 @@
   </div>
 
   <!-- ============ Tuiles ============ -->
-  <div class="tuiles" v-if="onglet!=='reglages' && onglet!=='inventaire' && prixCharges">
+  <div class="tuiles" v-if="onglet!=='reglages' && onglet!=='inventaire' && onglet!=='fiche' && prixCharges">
     <div class="tuile">
       <div class="k">Opportunités</div>
       <div class="v">{{ fmt(lignes.length) }}</div>
@@ -787,6 +788,314 @@
         Et l'API ne publie que le prix de la première unité du carnet d'ordres : acheter en masse
         fera glisser tes prix d'achat.
       </div>
+    </template>
+  </template>
+
+  <!-- ============================== FICHE OBJET ============================== -->
+  <template v-if="onglet==='fiche'">
+
+    <!-- ---- Recherche ---- -->
+    <div class="filtres">
+      <div class="champ">
+        <span class="lab">Chercher un objet</span>
+        <input type="text" v-model="rechercheFiche" placeholder="ex : hache du maître, bottes de plaque, arc…" autofocus>
+        <span class="statut" v-if="!rechercheFiche">Tape au moins deux lettres. Le nom porte le niveau :
+          « de l'adepte » = T4, « du maître » = T6, « du sage » = T8.</span>
+      </div>
+      <div v-if="resultatsRecherche.length" class="tablewrap" style="margin-top:10px;max-height:320px;overflow-y:auto">
+        <table class="tb"><tbody>
+          <tr v-for="e in resultatsRecherche" :key="e.base" @click="chargerFiche(e.base)">
+            <td class="g">
+              <div class="objet">
+                <img :src="rendu(e.base)" loading="lazy" @error="imgErr($event,e.base)" alt="">
+                <div>
+                  <div class="nom">{{ e.nom }}</div>
+                  <div class="id">
+                    <span class="pastille t">T{{ e.tier }}</span>
+                    <span class="pastille">{{ labelCategorie(e.categorie) }}</span>
+                    <span class="pastille" v-if="e.lignee!=='commun'">{{ labelLignee(e.lignee) }}</span>
+                    {{ e.base }} · {{ e.enchs.length }} niveau(x)
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody></table>
+      </div>
+      <div v-else-if="rechercheFiche.trim().length>=2" class="statut" style="margin-top:10px">
+        Aucun objet ne correspond.
+      </div>
+    </div>
+
+    <div v-if="!objetFiche" class="vide-msg">
+      Cherche un objet pour voir tout ce qu'on peut en dire.
+    </div>
+
+    <template v-else>
+      <!-- ---- En-tête ---- -->
+      <div class="carte" style="margin-bottom:12px">
+        <h3>
+          <span>{{ iconeCategorie(objetFiche.categorie) }} {{ objetFiche.nom }}</span>
+          <span class="n">{{ objetFiche.base }} · {{ labelStation(objetFiche.station) }}</span>
+        </h3>
+        <div class="carte-corps" v-if="!ficheChargee">
+          <div class="actions" style="margin:0;padding:0;border:none">
+            <button @click="chargerFiche(objetFiche.base)" :disabled="chargement">Charger les prix</button>
+            <div v-if="chargement" class="barre-progres"><i :style="{width: progres+'%'}"></i></div>
+            <span class="statut">{{ statut }}</span>
+          </div>
+        </div>
+      </div>
+
+      <template v-if="ficheChargee">
+        <!-- ---- Les enchantements côte à côte ---- -->
+        <div class="carte" style="margin-bottom:12px">
+          <h3>
+            <span>📐 Les {{ colonnes.length }} niveau(x) d'enchantement</span>
+            <span class="n">clique une colonne pour voir son détail</span>
+          </h3>
+          <div class="carte-corps" style="padding:0;overflow-x:auto">
+            <table class="tb">
+              <thead><tr>
+                <th class="g">&nbsp;</th>
+                <th v-for="c in colonnes" :key="c.ench"
+                    :style="c.ench===enchFiche ? {color:'#fff',background:'#2a2620'} : null"
+                    @click="enchFiche=c.ench">.{{ c.ench }}</th>
+              </tr></thead>
+              <tbody>
+                <tr><td class="g">Coût de revient</td>
+                  <td v-for="c in colonnes" :key="c.ench" data-lab="Coût">{{ fmtM(c.cout) }}</td></tr>
+                <tr><td class="g">dont frais de station</td>
+                  <td v-for="c in colonnes" :key="c.ench" class="na" data-lab="Frais">{{ fmtM(c.frais) }}</td></tr>
+                <tr><td class="g">Retour de ressources</td>
+                  <td v-for="c in colonnes" :key="c.ench" data-lab="Retour">{{ fmtPct(c.taux) }}</td></tr>
+                <tr><td class="g">Revenu net</td>
+                  <td v-for="c in colonnes" :key="c.ench" data-lab="Revenu">{{ fmtM(c.revenu) }}</td></tr>
+                <tr><td class="g">Profit</td>
+                  <td v-for="c in colonnes" :key="c.ench" :class="profitClasse(c.profit)" data-lab="Profit">
+                    {{ c.profit!=null ? signe(c.profit) : '—' }}</td></tr>
+                <tr><td class="g">Marge</td>
+                  <td v-for="c in colonnes" :key="c.ench" :class="profitClasse(c.profit)" data-lab="Marge">
+                    {{ c.marge!=null ? fmtPct(c.marge) : '—' }}</td></tr>
+                <tr><td class="g">Volume /jour</td>
+                  <td v-for="c in colonnes" :key="c.ench" data-lab="Volume">{{ c.vol ? fmt(c.vol) : '—' }}</td></tr>
+                <tr><td class="g">Meilleur débouché</td>
+                  <td v-for="c in colonnes" :key="c.ench" data-lab="Débouché" style="font-size:11px">
+                    <span v-if="c.meilleur" class="canal" :class="c.meilleur.bm?'bm':'ville'">
+                      {{ c.meilleur.bm?'🏴':'🏛️' }} {{ c.meilleur.lieu }}
+                    </span>
+                    <span v-else class="na">{{ c.rejet || '—' }}</span>
+                  </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ---- Arbre de coût ---- -->
+        <div class="carte" style="margin-bottom:12px" v-if="decomposerFiche">
+          <h3><span>🌳 D'où vient le coût du .{{ enchFiche }}</span>
+            <span class="n">acheter, raffiner ou fabriquer à chaque étage</span></h3>
+          <div class="carte-corps">
+            <div class="arbre">
+              <arbre-noeud v-for="l in decomposerFiche.lignes" :key="l.id"
+                           :ligne="l" :recette="colonneChoisie.id"></arbre-noeud>
+            </div>
+            <div class="statut" style="margin-top:8px">
+              Lecture seule ici : le forçage d'une voie reste dans le panneau de détail de l'onglet Tableau,
+              où il ne porte que sur un étage à la fois.
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- Où fabriquer ---- -->
+        <div class="carte" style="margin-bottom:12px">
+          <h3><span>🏙️ Où fabriquer le .{{ enchFiche }}</span>
+            <span class="n">classé par profit</span></h3>
+          <div class="carte-corps" style="padding:0;overflow-x:auto">
+            <table class="tb">
+              <thead><tr>
+                <th class="g">Ville</th><th>Retour</th><th>Coût</th>
+                <th>Sur place</th><th>Black Market</th><th>Tarif station</th><th>Marché local</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="(v,i) in tableauVilles" :key="v.ville" :class="{on:i===0}">
+                  <td class="g">
+                    <b>{{ v.ville }}</b>
+                    <span v-if="v.bonusCraft" class="pastille" style="color:var(--bon);border-color:#1c5c1c">craft +15</span>
+                    <span v-if="!v.bonusRaffinage" class="pastille" title="Cette ville ne raffine aucune ressource">pas de raffinage</span>
+                  </td>
+                  <td data-lab="Retour">{{ fmtPct(v.taux) }}</td>
+                  <td data-lab="Coût">{{ fmtM(v.cout) }}</td>
+                  <td data-lab="Sur place" :class="profitClasse(v.profitSurPlace)">
+                    {{ v.profitSurPlace!=null ? signe(v.profitSurPlace) : '—' }}</td>
+                  <td data-lab="Black Market" :class="profitClasse(v.profitBM)">
+                    {{ v.profitBM!=null ? signe(v.profitBM) : '—' }}</td>
+                  <td data-lab="Tarif"><input type="number" min="0" step="50"
+                       :value="v.tarif" @input="fi.tarifs[v.ville]=+$event.target.value||0"
+                       style="width:78px;padding:4px 5px;font-size:12px"></td>
+                  <td data-lab="Marché local">
+                    <span v-if="v.sansPrix" class="avert-inline">{{ v.sansPrix }} sans prix ici</span>
+                    <span v-else-if="v.ecartLocal!=null" :class="v.ecartLocal>0?'neg':'pos'">
+                      {{ signe(-v.ecartLocal) }}</span>
+                    <span v-else class="na">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="carte-corps" style="padding-top:10px">
+            <button class="plat" @click="appliquerTarifPartout(r.tarifStation)">
+              Remettre le tarif global ({{ r.tarifStation }}) partout</button>
+            <div class="statut" style="margin-top:10px;line-height:1.55">
+              <b style="color:var(--txt)">Coût</b> et <b style="color:var(--txt)">Retour</b> mesurent
+              le seul effet du bonus de la ville : les achats restent autorisés partout, donc c'est la part
+              structurelle, celle sur laquelle on décide de s'installer.
+              <b style="color:var(--txt)">Marché local</b> montre ce qu'on gagnerait en n'achetant que sur
+              place — part volatile, qui bouge toutes les demi-heures.
+              La ville qui bonifie la fabrication d'un objet ne raffine ses matières que dans 17 % des cas :
+              s'installer là veut donc presque toujours dire renoncer aux +40 du raffinage.
+              <b style="color:var(--txt)">Le transport n'est pas compté.</b>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- Surcharges ---- -->
+        <div class="carte" style="margin-bottom:12px">
+          <h3><span>✏️ Mes propres valeurs</span>
+            <span class="n">{{ nbSurcharges ? nbSurcharges + ' surcharge(s) active(s)' : 'aucune surcharge' }}</span></h3>
+          <div class="carte-corps">
+            <div class="grille-filtres">
+              <div class="champ">
+                <span class="lab">Prix de vente imposé</span>
+                <input type="number" min="0" step="1000" v-model.number="fi.prixVente" placeholder="prix du marché">
+                <div class="cases" style="margin-top:6px">
+                  <label><input type="radio" :value="true" v-model="fi.prixVenteBrut"> prix affiché</label>
+                  <label><input type="radio" :value="false" v-model="fi.prixVenteBrut"> net encaissé</label>
+                </div>
+                <span class="statut">« Affiché » subit taxe, frais d'ordre et undercut par-dessus.
+                  « Net » est ce que tu touches vraiment. <b style="color:var(--alerte)">9,5 points d'écart.</b></span>
+              </div>
+              <div class="champ">
+                <span class="lab">Retour de ressources forcé — fabrication</span>
+                <input type="number" min="0" max="0.99" step="0.01" v-model.number="fi.rrrForceFabrication" placeholder="calculé">
+                <span class="lab" style="margin-top:8px">— raffinage</span>
+                <input type="number" min="0" max="0.99" step="0.01" v-model.number="fi.rrrForceRaffinage" placeholder="calculé">
+                <span class="statut">En fraction : 0,367 pour 36,7 %. Pour un bonus que l'outil ne modélise
+                  pas, comme un repaire ou ses Power Cores.</span>
+              </div>
+              <div class="champ">
+                <span class="lab">Quantité à produire</span>
+                <input type="number" min="1" step="1" v-model.number="fi.quantite">
+              </div>
+              <div class="champ">
+                <span class="lab">&nbsp;</span>
+                <button class="plat" @click="viderSurcharges()" :disabled="!nbSurcharges">
+                  Tout remettre au marché</button>
+              </div>
+            </div>
+
+            <div style="margin-top:14px" v-if="ingredientsSurchargeables.length">
+              <span class="lab">Prix des ingrédients</span>
+              <table class="rg" style="margin-top:6px">
+                <thead><tr><th>Ingrédient</th><th style="text-align:right">Marché</th><th>Mon prix</th></tr></thead>
+                <tbody>
+                  <tr v-for="x in ingredientsSurchargeables" :key="x.id">
+                    <td>{{ x.nom }}
+                      <span v-if="fi.manual[x.id]>0" class="pastille" style="color:var(--gold);border-color:var(--gold)">manuel</span>
+                    </td>
+                    <td style="text-align:right" class="na">{{ fmtM(x.prixMarche) }} <span style="font-size:10px">{{ x.ville }}</span></td>
+                    <td style="width:130px"><input type="number" min="0" step="10"
+                         v-model.number="fi.manual[x.id]" placeholder="—"
+                         style="padding:4px 5px;font-size:12px"></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="statut" style="margin-top:8px">
+                Un prix saisi s'applique <b style="color:var(--txt)">dans toutes les villes</b> : la ligne
+                correspondante du tableau ci-dessus perd alors sa dimension géographique.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- Bilan pour la quantité ---- -->
+        <div class="carte" style="margin-bottom:12px" v-if="bilanQuantite">
+          <h3><span>🧾 Produire {{ fmt(bilanQuantite.q) }} × .{{ enchFiche }}</span>
+            <span class="n">liste de courses complète</span></h3>
+          <div class="carte-corps">
+            <div class="tuiles" style="margin-bottom:12px">
+              <div class="tuile"><div class="k">Matières</div><div class="v">{{ fmtM(bilanQuantite.matieres) }}</div></div>
+              <div class="tuile"><div class="k">Frais de station</div><div class="v">{{ fmtM(bilanQuantite.frais) }}</div></div>
+              <div class="tuile"><div class="k">Total à sortir</div><div class="v">{{ fmtM(bilanQuantite.total) }}</div></div>
+              <div class="tuile"><div class="k">Profit attendu</div>
+                <div class="v" :class="profitClasse(bilanQuantite.profit)">
+                  {{ bilanQuantite.profit!=null ? signe(bilanQuantite.profit) : '—' }}</div></div>
+            </div>
+
+            <div class="bandeau avert" v-if="bilanQuantite.volumeTendu">
+              ⚠ Cette quantité représente <b>{{ bilanQuantite.jours.toFixed(1) }} jours</b> du volume échangé.
+              Le marché ne l'absorbera pas d'un coup, et l'API ne publie que le prix de la première unité :
+              tes prix glisseront dans les deux sens.
+            </div>
+            <div class="bandeau avert" v-if="bilanQuantite.focusDepasse">
+              ⚠ Le raffinage demanderait <b>{{ fmt(bilanQuantite.focus) }} points de focus</b>,
+              alors que le jeu en plafonne la réserve à 30 000.
+            </div>
+
+            <table class="rg">
+              <thead><tr><th>À acheter</th><th style="text-align:right">Quantité</th>
+                <th style="text-align:right">Coût</th><th>Où</th></tr></thead>
+              <tbody>
+                <tr v-for="x in bilanQuantite.liste" :key="x.id+x.where">
+                  <td>{{ x.nom }}</td>
+                  <td style="text-align:right">{{ fmt(Math.ceil(x.qte)) }}</td>
+                  <td style="text-align:right">{{ fmtM(x.cout) }}</td>
+                  <td class="na">{{ x.where }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="statut" style="margin-top:8px">
+              Les quantités tiennent compte du retour de ressources.
+              <span v-if="bilanQuantite.focus>0">Focus de raffinage nécessaire :
+                {{ fmt(bilanQuantite.focus) }} points. Le coût en focus de la <b style="color:var(--txt)">fabrication</b>
+                n'est publié nulle part et n'est donc pas compté.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- Fiche technique ---- -->
+        <div class="carte" v-if="ficheTechnique">
+          <h3><span>📊 Fiche technique</span><span class="n">données du jeu, hors économie</span></h3>
+          <div class="carte-corps">
+            <div v-if="ficheTechnique.ip">
+              <span class="lab">Item Power</span>
+              <div style="overflow-x:auto">
+                <table class="rg" style="margin-top:6px">
+                  <thead><tr><th>Ench.</th>
+                    <th v-for="q in ficheTechnique.qualites" :key="q" style="text-align:right">{{ q }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(ligne,e) in ficheTechnique.ip" :key="e">
+                      <td><b>.{{ e }}</b></td>
+                      <td v-for="(v,i) in ligne" :key="i" style="text-align:right">{{ v ?? '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div v-else class="statut">Item Power non disponible pour cet objet.</div>
+
+            <div v-if="ficheTechnique.stats" style="margin-top:14px">
+              <span class="lab">Caractéristiques
+                <span style="text-transform:none;font-weight:400">(niveau .0, qualité Normale — le jeu ne publie pas les autres)</span></span>
+              <div class="grille-filtres" style="margin-top:6px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+                <div class="kv" v-for="(v,k) in ficheTechnique.stats" :key="k">
+                  <span>{{ labelStat(k) }}</span><b>{{ v }}</b>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
     </template>
   </template>
 

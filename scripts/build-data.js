@@ -396,16 +396,100 @@ for (const id of Object.keys(artefacts)) {
 const nomsWikiParId = {};
 for (const x of wikiNoms) if (x.unique_name) nomsWikiParId[x.unique_name] = x;
 
+// Les dumps Jaccak contiennent 166 caracteres de remplacement U+FFFD, sequelles
+// d'un decodage rate en amont (« ma<?>tre » pour « maitre »). Le wiki, lui, est
+// propre. Quand le nom des dumps est abime, on prend celui du wiki.
+const abime = s => typeof s === 'string' && s.includes('�');
+
 const outNames = {};
-let missingNames = 0;
+let missingNames = 0, reparesEncodage = 0;
 for (const id of referencedItems) {
   const n = names[id] || names[id.split('@')[0]];
-  if (n) { outNames[id] = { fr: n['FR-FR'] || n['EN-US'] || id, en: n['EN-US'] || id }; continue; }
   const w = nomsWikiParId[id] || nomsWikiParId[id.split('@')[0]];
+  if (n) {
+    let fr = n['FR-FR'] || n['EN-US'] || id;
+    const en = n['EN-US'] || id;
+    if (abime(fr)) {
+      if (w && w.nom_fr && !abime(w.nom_fr)) { fr = w.nom_fr; reparesEncodage++; }
+      else { fr = en; reparesEncodage++; }
+    }
+    outNames[id] = { fr, en };
+    continue;
+  }
   if (w) { outNames[id] = { fr: w.nom_fr || w.nom_en || id, en: w.nom_en || id }; continue; }
   outNames[id] = { fr: id, en: id };
   missingNames++;
 }
+
+// ---------------------------------------------------------------------------
+//  Fiche technique : Item Power et statistiques de combat
+//
+//  Sortie separee (data/fiches.json) : ces donnees ne servent qu'a l'onglet
+//  Fiche, inutile de les charger avec le catalogue.
+//
+//  Les deux sources brutes pesent 8,9 Mo et vivent dans un AUTRE projet : ni
+//  servables par Lancer.bat, ni deployables sur Pages. On les elague ici aux
+//  seuls objets du catalogue.
+//
+//  Piege de jointure : dans item_variants.json, `unique_name` ne contient JAMAIS
+//  de « @ » (verifie : 0 sur 34 122). La cle est le triplet
+//  (base, enchantement, qualite), la qualite etant une CHAINE et non l'entier
+//  1-5 de l'API. On indexe par [base][enchantement] = 5 valeurs, dans l'ordre
+//  des qualites de l'API.
+// ---------------------------------------------------------------------------
+const ORDRE_QUALITES = ['Normal', 'Good', 'Outstanding', 'Excellent', 'Masterpiece'];
+
+const basesCatalogue = new Set();
+for (const r of Object.values(includedRecipes)) {
+  if (r.categorie) basesCatalogue.add(r.id.split('@')[0]);
+}
+
+const variants = loadWiki('item_variants.json');
+const ip = {};
+for (const v of variants) {
+  const base = v.unique_name;
+  if (!base || !basesCatalogue.has(base)) continue;
+  const q = ORDRE_QUALITES.indexOf(v.quality);
+  if (q < 0) continue;
+  const parEnch = ip[base] || (ip[base] = {});
+  const ligne = parEnch[v.enchantment] || (parEnch[v.enchantment] = [null, null, null, null, null]);
+  ligne[q] = v.item_power;
+}
+
+// Statistiques de combat. items.json est ENTIEREMENT en qualite Normale et en
+// enchantement 0 : ces valeurs ne valent donc que pour l'objet de base. On ne
+// les extrapole pas, ce serait inventer une donnee.
+const CHAMPS_STATS = [
+  'item_value', 'weight', 'equipment_slot', 'shop_category', 'shop_subcategory',
+  'attack_damage', 'attack_speed', 'ability_power', 'armor', 'magical_resistance',
+  'max_hit_points', 'max_energy', 'hit_points_regeneration_bonus',
+  'energy_regeneration_bonus', 'cc_resistance', 'resilience_penetration',
+];
+const stats = {};
+for (const it of wikiItems) {
+  if (!it.unique_name || !basesCatalogue.has(it.unique_name)) continue;
+  const o = {};
+  for (const c of CHAMPS_STATS) {
+    let v = it[c];
+    // max_energy est stocke en CHAINE dans le wiki alors que ses voisins sont
+    // numeriques : on normalise ici plutot que de pieger l'affichage.
+    if (v != null && v !== '' && c !== 'equipment_slot' && c !== 'shop_category'
+      && c !== 'shop_subcategory' && typeof v === 'string') {
+      const n = parseFloat(v);
+      v = isNaN(n) ? v : n;
+    }
+    if (v != null && v !== '') o[c] = v;
+  }
+  if (Object.keys(o).length) stats[it.unique_name] = o;
+}
+
+const OUT_FICHES = path.resolve(__dirname, '..', 'data', 'fiches.json');
+fs.writeFileSync(OUT_FICHES, JSON.stringify({
+  generatedAt: new Date().toISOString(),
+  source: 'wiki Albion (item_variants.json + items.json)',
+  ordreQualites: ORDRE_QUALITES,
+  ip, stats,
+}));
 
 // ---------------------------------------------------------------------------
 //  Economie
@@ -466,6 +550,10 @@ console.log('Sous-recettes (chaine)   :', recipes.length - affichables);
 console.log('Recettes totales         :', recipes.length);
 console.log('Artefacts a la fonderie  :', Object.keys(artefacts).length);
 console.log('Items nommes             :', Object.keys(outNames).length, '(' + missingNames + ' sans nom officiel)');
+if (reparesEncodage) console.log('   dont noms repares       :', reparesEncodage, '(caracteres abimes dans les dumps)');
+console.log('Fiches techniques        :', Object.keys(ip).length, 'objets avec Item Power,',
+  Object.keys(stats).length, 'avec statistiques ->',
+  (fs.statSync(OUT_FICHES).size / 1024).toFixed(0), 'Ko');
 
 console.log('--- Bonus de fabrication, par ville bonifiante ---');
 for (const [v, n] of Object.entries(parVille).sort((a, b) => b[1] - a[1])) {

@@ -173,6 +173,68 @@ sans focus, et le bénéfice annoncé est un **plancher**.
 
 ---
 
+## 🔎 L'onglet « Fiche objet »
+
+Tape un objet, obtiens tout ce qu'on peut en dire. Cinq requêtes, environ trois
+secondes.
+
+### Les 5 enchantements côte à côte
+
+Coût, retour de ressources, revenu net, profit, marge, volume et meilleur débouché,
+en colonnes. C'est l'information la plus rentable de la page : savoir que le .2 rapporte
+trois fois le .0 change la décision immédiatement. L'arbre de coût détaillé s'affiche
+pour la colonne sélectionnée.
+
+### Où fabriquer, en deux lectures
+
+Le piège : **la ville qui bonifie la fabrication d'un objet ne raffine ses matières que
+dans 17 % des cas**. S'installer là veut donc presque toujours dire renoncer aux +40 du
+raffinage. D'où deux colonnes distinctes :
+
+- **Coût et Retour** mesurent le seul effet du bonus de la ville, achats autorisés
+  partout. Part **structurelle**, stable, celle sur laquelle on décide de s'installer.
+- **Marché local** montre ce qu'on gagnerait en n'achetant que sur place, et compte les
+  matières sans ordre frais. Part **volatile**, qui bouge toutes les demi-heures.
+
+Le revenu est séparé en **sur place** et **Black Market**, jamais leur maximum : ce sont
+deux décisions logistiques différentes, et le Black Market donne le même prix depuis
+n'importe où. Le **tarif de station est réglable ville par ville**, parce qu'il est fixé
+par le propriétaire du bâtiment et que c'est une des raisons de s'installer quelque part.
+
+⚠️ **Caerleon et Brécilien ne raffinent rien** et leurs lignes le signalent.
+
+### Mes propres valeurs
+
+Prix de chaque ingrédient, prix de vente, taux de retour (fabrication et raffinage
+séparément), tarif de station par ville, quantité à produire.
+
+Pour le prix de vente, **deux modes obligatoires** : « prix affiché » subit taxe, frais
+d'ordre et undercut par-dessus ; « net encaissé » est ce que tu touches vraiment. Il y a
+**9,5 points d'écart** entre les deux.
+
+Un prix d'ingrédient saisi s'applique dans toutes les villes : la ligne correspondante du
+tableau perd alors sa dimension géographique, et une pastille le signale.
+
+### La quantité
+
+Liste de courses complète, avec les quantités après retour de ressources.
+
+⚠️ **Les frais de station se paient à chaque étage**, pas seulement au craft final. Sur
+une hache T6, le total réel est de **1 925 silver contre 922** pour le seul assemblage :
+la chaîne de raffinage double les frais. Les additionner à la main sous-estimait la
+dépense, la page déduit donc les frais du coût total exact du moteur.
+
+Deux avertissements s'allument : quand la quantité dépasse un jour du volume échangé, et
+quand le raffinage demanderait plus que les 30 000 points de focus du jeu.
+
+### La fiche technique
+
+Item Power pour les 25 combinaisons enchantement × qualité, et caractéristiques de
+combat. Le wiki ne publie ces dernières **qu'au niveau .0 en qualité Normale** : elles ne
+sont donc pas extrapolées.
+
+---
+
 ## 🧮 Comment fonctionne le calcul
 
 ### Coût d'un ingrédient
@@ -371,7 +433,8 @@ js/debouches.js          Les quatre canaux de vente, garde-fous, pondération qu
 js/inventaire.js         Le stock : saisie, persistance, focus, puisage
 js/solveur.js            Allocation sous contraintes de l'onglet Ma banque
 js/app.js                État, filtres, vues
-data/equipment-data.json Données générées (2,9 Mo)
+data/equipment-data.json Données générées (3,4 Mo)
+data/fiches.json         Item Power et caractéristiques (511 Ko)
 scripts/build-data.js    Générateur depuis la librairie voisine
 Lancer.bat               Lance serveur + navigateur (Windows)
 .nojekyll                Désactive Jekyll sur GitHub Pages
@@ -444,6 +507,13 @@ voir d'un coup d'œil qu'aucune ville n'est anormalement chargée.
 - **Journaux de laboureurs** : fabriquer remplit des journaux qui valent du silver.
   Ce revenu annexe n'est pas compté — il demanderait la renommée d'artisanat par
   recette, absente des données.
+- **Le tableau « où fabriquer » ne chiffre pas le transport** : il compare les bonus,
+  pas les trajets. Caerleon et Brécilien n'ont aucun bonus de raffinage.
+- **250 produits n'ont pas d'Item Power** dans les données du wiki, et les
+  caractéristiques de combat n'existent qu'au niveau .0 en qualité Normale.
+- **Le forçage d'une voie n'agit qu'au premier étage** de l'arbre : forcer en profondeur
+  change l'affichage du nœud sans changer le total du parent. L'arbre de la fiche est
+  donc en lecture seule, le forçage restant dans le panneau de détail.
 - **Transport et risque** entre villes : non chiffrés, à gérer par la sélection des
   villes. Le cas est courant dans la chaîne de raffinage : la fibre T6 la moins chère
   peut être à Bridgewatch alors que le raffinage bonifié se fait à Lymhurst. L'outil

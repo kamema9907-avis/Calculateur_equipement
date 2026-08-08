@@ -111,7 +111,13 @@ function pointsSpecialite(entreeTable, villeChoisie, bareme) {
   return 0;
 }
 
+// `rrrForce…` permet a l'onglet Fiche d'imposer un taux mesure en jeu, pour un
+// bonus que l'outil ne modelise pas (repaire, Power Cores, evenement inconnu).
+// Strictement additif : aucun contexte existant ne porte ces champs. Attention,
+// inventaire.js propage tout le contexte dans ses appels : ne jamais les poser
+// sur le contexte de l'onglet banque.
 export function rrrRaffinage(id, ctx) {
+  if (ctx.rrrForceRaffinage != null) return ctx.rrrForceRaffinage;
   const type = typeRaffinage(id);
   let pts = POINTS_BASE + ctx.eventBonus + (ctx.focusRaffinage ? POINTS_FOCUS : 0);
   pts += pointsSpecialite(ctx.tableVilles.raffinage[type], ctx.villeRaffinage,
@@ -120,6 +126,7 @@ export function rrrRaffinage(id, ctx) {
 }
 
 export function rrrFabrication(recette, ctx) {
+  if (ctx.rrrForceFabrication != null) return ctx.rrrForceFabrication;
   const cle = cleBonusFabrication(recette);
   let pts = POINTS_BASE + ctx.eventBonus + (ctx.focusFabrication ? POINTS_FOCUS : 0);
   pts += pointsSpecialite(ctx.tableVilles.fabrication[cle], ctx.villeFabrication,

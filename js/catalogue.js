@@ -71,6 +71,19 @@ export const CANAUX = [
   { cle: 'ville_ordre',   label: 'Ville (ordre de vente)',  court: 'Ville 📋', instantane: false, bm: false },
 ];
 
+// Libelles des caracteristiques du wiki, qui arrivent en anglais technique.
+const STATS = {
+  item_value: "Valeur d'objet", weight: 'Poids', equipment_slot: 'Emplacement',
+  shop_category: 'Catégorie', shop_subcategory: 'Famille',
+  attack_damage: "Dégâts d'attaque", attack_speed: "Vitesse d'attaque",
+  ability_power: 'Puissance de capacité', armor: 'Armure',
+  magical_resistance: 'Résistance magique', max_hit_points: 'Points de vie',
+  max_energy: 'Énergie', hit_points_regeneration_bonus: 'Régénération de vie',
+  energy_regeneration_bonus: "Régénération d'énergie",
+  cc_resistance: 'Résistance au contrôle', resilience_penetration: 'Pénétration de résilience',
+};
+export const labelStat = k => STATS[k] || k.split('_').join(' ');
+
 // ---------------------------------------------------------------------------
 //  Helpers d'affichage
 // ---------------------------------------------------------------------------

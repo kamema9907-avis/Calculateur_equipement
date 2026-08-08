@@ -187,9 +187,15 @@ const app = createApp({
     onMounted(async () => {
       try {
         const d = await (await fetch('data/equipment-data.json')).json();
-        donnees = { ...d, byId: {} };
+        donnees = { ...d, byId: {}, fiches: { ip: {}, stats: {}, ordreQualites: [] } };
         for (const rec of d.recipes) donnees.byId[rec.id] = rec;
         pret.value = true;
+        // Fiches techniques : 511 Ko qui ne servent qu'a l'onglet Fiche, donc
+        // chargees apres coup et sans bloquer. Leur absence n'empeche rien.
+        fetch('data/fiches.json')
+          .then(x => x.json())
+          .then(fx => { donnees.fiches = fx; versionFiche.value++; })
+          .catch(() => { /* l'onglet Fiche dira simplement « donnee absente » */ });
       } catch {
         erreur.value = "Impossible de charger data/equipment-data.json. "
           + "Sers le dossier par un serveur HTTP (Lancer.bat) : le navigateur bloque fetch() en file://.";
@@ -499,7 +505,14 @@ const app = createApp({
     // « Ma banque », c'est le bonus de la ville de base qui s'applique, pas
     // celui du reglage global.
     function decomposerRecette(rec) {
-      return M.decomposer(rec, onglet.value === 'inventaire' ? ctxInventaire() : contexte(), forcees);
+      const ctx = onglet.value === 'fiche' ? ctxFiche()
+        : onglet.value === 'inventaire' ? ctxInventaire()
+        : contexte();
+      // L'arbre de la fiche est en LECTURE SEULE : `forcees` n'agit qu'au premier
+      // niveau de decomposer(), donc forcer une voie en profondeur changerait
+      // l'affichage du noeud sans changer le total du parent. Le forçage reste
+      // au panneau de detail, ou l'arbre n'a qu'un etage visible a la fois.
+      return M.decomposer(rec, ctx, onglet.value === 'fiche' ? {} : forcees);
     }
     partage.decomposer = decomposerRecette;
     partage.choisirVoie = (recetteId, ingId, methode) => {
@@ -723,6 +736,333 @@ const app = createApp({
         .sort((a, b) => b.cout - a.cout);
     });
 
+    // ========================== ONGLET FICHE ==========================
+    //
+    //  Etat de marche PROPRE a la fiche. Ecrire dans `prix`/`histo` detruirait
+    //  le balayage de l'onglet Tableau, et reciproquement.
+    //  `versionFiche` est le declencheur explicite : tout computed qui lit
+    //  prixFiche DOIT le lire aussi, sinon il ne se met jamais a jour.
+    let prixFiche = {}, histoFiche = {};
+    const versionFiche = ref(0);
+    const ficheChargee = ref(false);
+    const rechercheFiche = ref('');
+    const baseFiche = ref(null);
+    const enchFiche = ref(0);
+
+    const fi = reactive({
+      quantite: 1,
+      prixVente: null,
+      prixVenteBrut: true,      // true = prix affiche, false = net encaisse
+      rrrForceFabrication: null,
+      rrrForceRaffinage: null,
+      tarifs: {},               // par ville ; vide = tarif global
+      manual: {},               // id d'ingredient -> prix impose
+    });
+
+    // Index de recherche : une entree par objet de base. Aucun nom francais ne
+    // designe deux objets differents, le partage entre un objet et ses
+    // enchantements est justement le regroupement voulu.
+    const sansAccent = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const indexFiches = computed(() => {
+      if (!pret.value) return [];
+      const vues = new Map();
+      for (const rec of donnees.recipes) {
+        if (!rec.categorie) continue;
+        const base = rec.id.split('@')[0];
+        if (!vues.has(base)) {
+          vues.set(base, {
+            base, nom: nom(base), tier: rec.tier, categorie: rec.categorie,
+            lignee: rec.lignee, station: rec.station, enchs: [],
+            cle: sansAccent(nom(base) + ' ' + base),
+          });
+        }
+        const e = vues.get(base);
+        if (!e.enchs.includes(rec.enchantment)) e.enchs.push(rec.enchantment);
+      }
+      return [...vues.values()].map(e => ({ ...e, enchs: e.enchs.sort((a, b) => a - b) }));
+    });
+
+    const resultatsRecherche = computed(() => {
+      const q = sansAccent(rechercheFiche.value.trim());
+      if (q.length < 2) return [];
+      return indexFiches.value.filter(e => e.cle.includes(q)).slice(0, 60);
+    });
+
+    const objetFiche = computed(() =>
+      indexFiches.value.find(e => e.base === baseFiche.value) || null);
+
+    // Tous les ids a tarifer : le produit aux 5 enchantements, plus la fermeture
+    // de leurs chaines. Mesure : mediane 50 ids, maximum 115.
+    function idsFiche(base) {
+      const need = new Set(), pile = [], vus = new Set();
+      for (const e of [0, 1, 2, 3, 4]) {
+        const id = e ? base + '@' + e : base;
+        const rec = donnees.byId[id];
+        if (!rec) continue;
+        need.add(id);
+        for (const i of rec.ingredients) pile.push(i.id);
+      }
+      while (pile.length) {
+        const id = pile.pop();
+        need.add(id);
+        if (vus.has(id)) continue;
+        vus.add(id);
+        const a = donnees.artefacts[id];
+        if (a) need.add(a.runeId);
+        const sous = donnees.byId[id];
+        if (sous) for (const i of sous.ingredients) pile.push(i.id);
+      }
+      return [...need];
+    }
+
+    async function chargerFiche(base, forcer = false) {
+      if (!pret.value || chargement.value) return;
+      baseFiche.value = base;
+      rechercheFiche.value = '';
+      ficheChargee.value = false;
+      chargement.value = true; erreur.value = ''; progres.value = 0;
+      try {
+        const ids = idsFiche(base);
+        const produits = ids.filter(x => x.split('@')[0] === base);
+        statut.value = 'Prix…';
+        // Les matieres n'existent qu'en qualite Normale, le produit en 5.
+        const { data: pm } = await Mk.chargerPrix(ids, V.TOUS_LIEUX, {
+          qualites: [1], forcer, cle: 'fiche:' + base,
+          onProgress: (a, b) => { progres.value = Math.round(a / b * 50); },
+        });
+        const { data: pq } = await Mk.chargerPrix(produits, V.TOUS_LIEUX, {
+          qualites: [1, 2, 3, 4, 5], forcer, cle: 'ficheq:' + base,
+          onProgress: (a, b) => { progres.value = 50 + Math.round(a / b * 25); },
+        });
+        const { data: h } = await Mk.chargerHistorique(produits, V.TOUS_LIEUX, {
+          qualites: [1], forcer, cle: 'ficheh:' + base,
+          onProgress: (a, b) => { progres.value = 75 + Math.round(a / b * 25); },
+        });
+        // Fusion : la couverture large des matieres, enrichie des qualites du produit.
+        prixFiche = pm;
+        for (const [id, parLieu] of Object.entries(pq)) {
+          const cible = prixFiche[id] || (prixFiche[id] = {});
+          for (const [lieu, parQ] of Object.entries(parLieu)) {
+            cible[lieu] = Object.assign(cible[lieu] || {}, parQ);
+          }
+        }
+        histoFiche = h;
+        ficheChargee.value = true;
+        versionFiche.value++;
+        enchFiche.value = (objetFiche.value?.enchs || [0])[0];
+        statut.value = `${C.fmt(ids.length)} objets tarifés · ${new Date().toLocaleTimeString('fr-FR')}`;
+      } catch (e) {
+        erreur.value = 'Chargement de la fiche interrompu (' + e.message + ').';
+      } finally { chargement.value = false; progres.value = 0; }
+    }
+
+    // Contexte de la fiche. `ville` null = les reglages globaux.
+    function ctxFiche({ ville = null, villesAchat = null } = {}) {
+      return M.creerContexte({
+        byId: donnees.byId, artefacts: donnees.artefacts, prices: prixFiche,
+        manual: fi.manual,
+        villesAchat: villesAchat || f.villesAchat,
+        villeRaffinage: ville || r.villeRaffinage,
+        villeFabrication: ville || r.villeFabrication,
+        tableVilles: table,
+        focusRaffinage: r.focusRaffinage, focusFabrication: r.focusFabrication,
+        eventBonus: r.eventBonus,
+        tarifStation: (ville && fi.tarifs[ville] != null) ? fi.tarifs[ville] : r.tarifStation,
+        autoriserRaffinage: r.autoriserRaffinage, autoriserArtefact: r.autoriserArtefact,
+        maxAgeH: f.maxAgeH || null,
+        rrrForceRaffinage: fi.rrrForceRaffinage,
+        rrrForceFabrication: fi.rrrForceFabrication,
+      });
+    }
+
+    // Prix de vente impose : on injecte un lieu synthetique. Le mode « net »
+    // neutralise taxe et undercut, le mode « brut » les laisse s'appliquer :
+    // 9,5 points d'ecart entre les deux, il faut que le choix soit explicite.
+    function prixDeVente(id) {
+      if (fi.prixVente == null || !(fi.prixVente > 0)) return prixFiche[id];
+      const p = fi.prixVente;
+      return { '(saisi)': { 1: { sell: p, buy: p, ageH: 0, ageAchatH: 0 } } };
+    }
+    function optsVente(extra = {}) {
+      const net = !fi.prixVenteBrut && fi.prixVente > 0;
+      return {
+        villesVente: f.villesVente, undercut: net ? 0 : r.undercut / 100,
+        taxeOrdre: net ? 0 : eco.value.ordre, taxeInstant: net ? 0 : eco.value.instant,
+        maxAgeH: fi.prixVente > 0 ? null : (f.maxAgeH || null),
+        parts: { 1: 1 }, ...extra,
+      };
+    }
+
+    // ---- Les 5 colonnes d'enchantement ----
+    const colonnes = computed(() => {
+      void versionFiche.value;
+      void [fi.manual, fi.prixVente, fi.prixVenteBrut, fi.rrrForceFabrication,
+        fi.rrrForceRaffinage, fi.quantite, r.tarifStation, r.villeFabrication,
+        r.villeRaffinage, r.focusFabrication, r.focusRaffinage, f.villesVente, f.villesAchat];
+      const o = objetFiche.value;
+      if (!o || !ficheChargee.value) return [];
+      const ctx = ctxFiche();
+      return o.enchs.map(e => {
+        const id = e ? o.base + '@' + e : o.base;
+        const rec = donnees.byId[id];
+        if (!rec) return { ench: e, id, absent: true };
+        const c = M.coutFabrication(rec, ctx);
+        const ev = D.evaluer(rec, c ? c.cost : null, prixDeVente(id) ? { [id]: prixDeVente(id) } : prixFiche,
+          histoFiche, optsVente());
+        const h = (histoFiche[id] || {});
+        const vol = Object.values(h).reduce((a, x) => a + ((x[1] || {}).vol || 0), 0);
+        return {
+          ench: e, id, recette: rec, nom: nom(id),
+          cout: c ? c.cost : null,
+          frais: M.fraisStation(rec, ctx),
+          taux: M.rrrDe(rec, ctx),
+          revenu: ev.rejet ? null : ev.revenu,
+          profit: ev.rejet ? null : ev.profit,
+          marge: ev.rejet ? null : ev.marge,
+          meilleur: ev.rejet ? null : ev.meilleur,
+          rejet: ev.rejet || null,
+          vol,
+        };
+      });
+    });
+
+    const colonneChoisie = computed(() =>
+      colonnes.value.find(c => c.ench === enchFiche.value) || colonnes.value[0] || null);
+
+    // ---- Le tableau des villes ----
+    const tableauVilles = computed(() => {
+      void versionFiche.value;
+      void [fi.manual, fi.tarifs, fi.rrrForceFabrication, fi.rrrForceRaffinage,
+        fi.prixVente, fi.prixVenteBrut, enchFiche.value, r.focusFabrication, r.focusRaffinage];
+      const col = colonneChoisie.value;
+      if (!col || col.absent || !ficheChargee.value) return [];
+      const rec = col.recette;
+
+      return V.VILLES.map(ville => {
+        // Lecture 1 : l'effet du bonus seul. Achats autorises partout, donc la
+        // seule chose qui bouge d'une ligne a l'autre est le taux de retour.
+        // C'est la part structurelle, celle sur laquelle on decide de s'installer.
+        const ctxB = ctxFiche({ ville });
+        const cB = M.coutFabrication(rec, ctxB);
+
+        // Lecture 2 : et si je n'achetais que sur place ? Part volatile.
+        const ctxL = ctxFiche({ ville, villesAchat: [ville] });
+        const cL = M.coutFabrication(rec, ctxL);
+        let sansPrix = 0;
+        for (const ing of rec.ingredients) {
+          if (!M.coutUnitaire(ing.id, ctxL)) sansPrix++;
+        }
+
+        const px = prixDeVente(col.id) ? { [col.id]: prixDeVente(col.id) } : prixFiche;
+        const surPlace = D.debouchesDe(px[col.id], histoFiche[col.id],
+          optsVente({ villesVente: [ville], inclureBM: false, qualite: 1 }))[0] || null;
+        const auBM = D.debouchesDe(px[col.id], histoFiche[col.id],
+          optsVente({ villesVente: [], inclureBM: true, qualite: 1 }))[0] || null;
+
+        return {
+          ville,
+          bonusCraft: (table.fabrication[V.cleBonusFabrication(rec)] || {}).ville === ville,
+          // Caerleon et Brecilien ne raffinent RIEN : leurs lignes paraitraient
+          // simplement mauvaises alors qu'elles obeissent a une autre mecanique.
+          bonusRaffinage: Object.values(table.raffinage).some(x => x.ville === ville),
+          taux: M.rrrDe(rec, ctxB),
+          cout: cB ? cB.cost : null,
+          coutLocal: cL ? cL.cost : null,
+          ecartLocal: (cB && cL) ? cL.cost - cB.cost : null,
+          sansPrix,
+          tarif: fi.tarifs[ville] != null ? fi.tarifs[ville] : r.tarifStation,
+          surPlace, auBM,
+          profitSurPlace: (cB && surPlace) ? surPlace.net - cB.cost : null,
+          profitBM: (cB && auBM) ? auBM.net - cB.cost : null,
+        };
+      }).sort((a, b) => (b.profitBM ?? b.profitSurPlace ?? -Infinity)
+        - (a.profitBM ?? a.profitSurPlace ?? -Infinity));
+    });
+
+    // ---- Le bloc quantite ----
+    const bilanQuantite = computed(() => {
+      void versionFiche.value;
+      void [fi.quantite, fi.manual, fi.tarifs, enchFiche.value];
+      const col = colonneChoisie.value;
+      if (!col || col.absent || !ficheChargee.value || !(fi.quantite > 0)) return null;
+      const q = fi.quantite;
+      const ctx = ctxFiche();
+      const rec = col.recette;
+
+      // courses() ne rend que les ACHATS de feuilles. Les frais de station, eux,
+      // se paient a CHAQUE etage : le craft final, mais aussi chaque raffinage
+      // de la chaine. Les additionner a la main sous-estimait la depense de
+      // 1 003 silver sur une hache T6 — trouve a l'audit.
+      // On prend donc le cout total exact du moteur et on en deduit les frais,
+      // meme comptabilite que le solveur de l'onglet banque.
+      const liste = Object.values(M.courses(rec.id, q, ctx, {}, new Set()))
+        .map(x => ({ ...x, cout: x.qte * x.prixU, nom: nom(x.id) }))
+        .sort((a, b) => b.cout - a.cout);
+      const matieres = liste.reduce((a, x) => a + x.cout, 0);
+      const cf = M.coutFabrication(rec, ctx);
+      const total = cf ? cf.cost * q : matieres;
+      const frais = Math.max(0, total - matieres);
+
+      // Focus : seul le raffinage a un cout publie. La fabrication, non.
+      let focus = 0;
+      if (r.focusRaffinage) {
+        for (const x of liste) {
+          const info = Inv.analyserRessource(x.id);
+          if (info && !info.brut) focus += Inv.coutFocus(info.type, info.tier, info.ench, 0) * x.qte;
+        }
+      }
+      const jours = col.vol > 0 ? q / col.vol : null;
+      return {
+        q, liste, matieres, frais, total,
+        profit: col.profit != null ? col.profit * q : null,
+        focus, focusDepasse: focus > 30000,
+        jours, volumeTendu: jours != null && jours > 1,
+      };
+    });
+
+    // ---- Fiche technique ----
+    const ficheTechnique = computed(() => {
+      const o = objetFiche.value;
+      if (!o) return null;
+      return {
+        ip: (donnees.fiches.ip || {})[o.base] || null,
+        stats: (donnees.fiches.stats || {})[o.base] || null,
+        qualites: donnees.fiches.ordreQualites || [],
+      };
+    });
+
+    const nbSurcharges = computed(() =>
+      Object.values(fi.manual).filter(v => v > 0).length
+      + (fi.prixVente > 0 ? 1 : 0)
+      + (fi.rrrForceFabrication != null ? 1 : 0)
+      + (fi.rrrForceRaffinage != null ? 1 : 0)
+      + Object.keys(fi.tarifs).length);
+
+    function viderSurcharges() {
+      Object.keys(fi.manual).forEach(k => delete fi.manual[k]);
+      Object.keys(fi.tarifs).forEach(k => delete fi.tarifs[k]);
+      fi.prixVente = null;
+      fi.rrrForceFabrication = null;
+      fi.rrrForceRaffinage = null;
+      versionFiche.value++;
+    }
+    function appliquerTarifPartout(t) {
+      for (const v of V.VILLES) fi.tarifs[v] = t;
+      versionFiche.value++;
+    }
+
+    // Les ingredients surchargeables : les feuilles reellement achetees, pas les
+    // 115 identifiants de toute la chaine.
+    const ingredientsSurchargeables = computed(() => {
+      void versionFiche.value;
+      const col = colonneChoisie.value;
+      if (!col || col.absent || !ficheChargee.value) return [];
+      const ctx = ctxFiche();
+      return Object.values(M.courses(col.recette.id, 1, ctx, {}, new Set()))
+        .map(x => ({ id: x.id, nom: nom(x.id), prixMarche: x.prixU, ville: x.where }))
+        .sort((a, b) => b.prixMarche - a.prixMarche);
+    });
+
     // ---- Table des bonus de ville ----
     function majTable() { V.sauverTable(table); versionPrix.value++; }
     const nbNonVerif = computed(() => V.nbNonVerifiees(table));
@@ -766,7 +1106,7 @@ const app = createApp({
       LIGNES: C.LIGNES, LIGNEES: C.LIGNEES, QUALITES: C.QUALITES, VILLES: V.VILLES,
       labelCategorie: C.labelCategorie, labelStation: C.labelStation,
       labelLignee: C.labelLignee, labelQualite: C.labelQualite,
-      iconeCategorie: C.iconeCategorie,
+      iconeCategorie: C.iconeCategorie, labelStat: C.labelStat,
       // calcul
       perimetre, lignes, lignesAffichees, estimation, eco, partsNormalisees, totalParts,
       meilleurProfit, partInstant, nbBlackMarket, nbAberrants, resumeRejets,
@@ -776,6 +1116,16 @@ const app = createApp({
       stock, inv, plan, planCharge, grilleBrut, grilleRaffine, totalInventaire,
       calculerPlan, viderInventaire, resteEnBanque, achatsParVille, ouvrirDepuisPlan,
       filtreElargi, ecartesParFiltre,
+      // fiche
+      fi, rechercheFiche, baseFiche, enchFiche, ficheChargee,
+      resultatsRecherche, objetFiche, colonnes, colonneChoisie,
+      tableauVilles, bilanQuantite, ficheTechnique, ingredientsSurchargeables,
+      nbSurcharges, chargerFiche, viderSurcharges, appliquerTarifPartout,
+      decomposerFiche: computed(() => {
+        void versionFiche.value;
+        const c = colonneChoisie.value;
+        return (c && !c.absent) ? decomposerRecette(c.recette) : null;
+      }),
       TIERS_STOCK: C.TIERS, LIBELLES_MAT: Inv.LIBELLES,
       // actions
       balayer, analyseFine, viderLeCache, trier, fleche, ouvrir, majTable,
@@ -783,6 +1133,9 @@ const app = createApp({
       // helpers
       nom, rendu: C.RENDU, fmt: C.fmt, fmtM: C.fmtM, fmtPct: C.fmtPct,
       signe: C.signe, fmtAge: C.fmtAge,
+      // Vert si positif, rouge si negatif, gris si inconnu. Le signe accompagne
+      // toujours la couleur : elle ne porte jamais l'information seule.
+      profitClasse: v => v == null ? 'na' : (v >= 0 ? 'pos' : 'neg'),
     };
   },
 });

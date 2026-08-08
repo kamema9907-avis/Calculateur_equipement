@@ -166,6 +166,30 @@ function ageEnHeures(date, maintenant) {
 }
 
 // ---------------------------------------------------------------------------
+//  Signature de cache
+//
+//  Elle doit distinguer DEUX APPELS QUI NE DEMANDENT PAS LA MEME CHOSE. Compter
+//  les identifiants ne suffit pas : les 1 437 objets du catalogue se repartissent
+//  sur 39 tailles de chaine seulement, et 99,9 % partagent la leur avec un autre
+//  objet. Le plus gros groupe compte 95 objets — le bouclier tour Mort-vivant,
+//  le bouclier Demon et le bouclier a pointes Morgane ont exactement la meme
+//  taille de chaine.
+//
+//  Sans le condense ci-dessous, consulter l'un puis l'autre dans les 30 minutes
+//  rendait les prix du PREMIER, sans aucun signe visible : cout de revient,
+//  marge et debouches tous faux, et parfaitement credibles.
+//
+//  djb2 sur les identifiants tries. Ce n'est pas de la cryptographie, juste de
+//  quoi separer deux listes differentes de meme longueur.
+// ---------------------------------------------------------------------------
+function condense(ids) {
+  let h = 5381;
+  const s = ids.slice().sort().join(',');
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+// ---------------------------------------------------------------------------
 //  Prix du carnet d'ordres
 //
 //  Retourne { itemId: { lieu: { qualite: { sell, buy, ageVente, ageAchat } } } }
@@ -176,7 +200,7 @@ function ageEnHeures(date, maintenant) {
 //   • Analyse fine : les 5 qualites, mais seulement sur les meilleurs candidats.
 // ---------------------------------------------------------------------------
 export async function chargerPrix(ids, lieux, { qualites = [1], onProgress, forcer, cle = 'prix' } = {}) {
-  const signature = [lieux.join(','), qualites.join(','), ids.length].join('|');
+  const signature = [lieux.join(','), qualites.join(','), ids.length, condense(ids)].join('|');
   if (!forcer) {
     const cache = await lireCache(cle, TTL_PRIX, signature);
     if (cache) return { data: cache, depuisCache: true };
@@ -228,7 +252,7 @@ export async function chargerPrix(ids, lieux, { qualites = [1], onProgress, forc
 //     qu'une journee a 2 000 dans la moyenne.
 // ---------------------------------------------------------------------------
 export async function chargerHistorique(ids, lieux, { qualites = [1], jours = 7, onProgress, forcer, cle = 'historique' } = {}) {
-  const signature = [lieux.join(','), qualites.join(','), ids.length, jours].join('|');
+  const signature = [lieux.join(','), qualites.join(','), ids.length, jours, condense(ids)].join('|');
   if (!forcer) {
     const cache = await lireCache(cle, TTL_HISTORIQUE, signature);
     if (cache) return { data: cache, depuisCache: true };

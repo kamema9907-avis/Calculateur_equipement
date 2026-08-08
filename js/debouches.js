@@ -59,11 +59,15 @@ export function debouchesDe(prixItem, histoItem, opts) {
   const {
     villesVente, qualite = 1, undercut = 0.03,
     taxeOrdre, taxeInstant, maxAgeH = null, volumeMin = 0,
-    exigerHistorique = false,
+    exigerHistorique = false, inclureBM = true,
   } = opts;
 
   const out = [];
-  const lieux = [...villesVente, BLACK_MARKET];
+  // Le Black Market gagne la plupart du temps, et l'appelant ne retient souvent
+  // que le meilleur debouche. Comparer des VILLES entre elles exige donc de
+  // pouvoir l'ecarter : sinon toutes les lignes affichent le meme revenu, celui
+  // du Black Market, et la comparaison ne compare plus rien.
+  const lieux = inclureBM ? [...villesVente, BLACK_MARKET] : [...villesVente];
 
   for (const lieu of lieux) {
     const px = ((prixItem || {})[lieu] || {})[qualite];
