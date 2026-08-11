@@ -233,11 +233,12 @@
     <div class="tab" :class="{on:onglet==='tableau'}" @click="onglet='tableau'">📊 Tableau</div>
     <div class="tab" :class="{on:onglet==='inventaire'}" @click="onglet='inventaire'">🎒 Ma banque</div>
     <div class="tab" :class="{on:onglet==='fiche'}" @click="onglet='fiche'">🔎 Fiche objet</div>
+    <div class="tab" :class="{on:onglet==='artefact'}" @click="onglet='artefact'">💎 Artéfact</div>
     <div class="tab" :class="{on:onglet==='reglages'}" @click="onglet='reglages'">⚙️ Réglages</div>
   </div>
 
   <!-- ============ Filtres (communs aux vues Repérage et Tableau) ============ -->
-  <div class="filtres" v-if="onglet!=='reglages' && onglet!=='inventaire' && onglet!=='fiche'">
+  <div class="filtres" v-if="onglet!=='reglages' && onglet!=='inventaire' && onglet!=='fiche' && onglet!=='artefact'">
     <div class="grille-filtres">
 
       <div class="champ pleine">
@@ -347,7 +348,7 @@
   </div>
 
   <!-- ============ Tuiles ============ -->
-  <div class="tuiles" v-if="onglet!=='reglages' && onglet!=='inventaire' && onglet!=='fiche' && prixCharges">
+  <div class="tuiles" v-if="onglet!=='reglages' && onglet!=='inventaire' && onglet!=='fiche' && onglet!=='artefact' && prixCharges">
     <div class="tuile">
       <div class="k">Opportunités</div>
       <div class="v">{{ fmt(lignes.length) }}</div>
@@ -1099,6 +1100,350 @@
     </template>
   </template>
 
+  <!-- ============================== ARTEFACT ==============================
+       Acheter, recycler, fondre. Trois vues sur le meme chargement.
+  ======================================================================== -->
+  <template v-if="onglet==='artefact'">
+
+    <div class="filtres">
+      <div class="actions" style="margin-bottom:10px">
+        <button @click="chargerArtefacts(false)" :disabled="chargement">
+          {{ artChargees ? 'Rafraîchir' : 'Charger le marché des artéfacts' }}
+        </button>
+        <button class="plat" v-if="artChargees" @click="chargerArtefacts(true)" :disabled="chargement">Forcer</button>
+        <span class="statut" v-if="!artChargees">725 artéfacts et 25 matériaux, prix et transactions réelles. Environ 15 s.</span>
+        <span class="statut" v-else>{{ fmt(resumeArt.total) }} artéfacts affichés ·
+          gain réalisable cumulé <b class="pos">{{ fmtM(resumeArt.gainJour) }}</b> silver par jour</span>
+      </div>
+      <div v-if="chargement" class="barre-progres"><i :style="{width: progres+'%'}"></i></div>
+      <div v-if="chargement" class="statut">{{ statut }}</div>
+
+      <div class="cases" style="margin-bottom:10px">
+        <label><input type="radio" value="artefacts" v-model="artf.vue"> Les artéfacts</label>
+        <label><input type="radio" value="bassins" v-model="artf.vue"> Bassins de fonte</label>
+        <label><input type="radio" value="matieres" v-model="artf.vue"> Matériaux</label>
+        <label><input type="radio" value="etalonnage" v-model="artf.vue"> Étalonnage</label>
+      </div>
+
+      <div class="grille-filtres">
+        <div class="champ">
+          <span class="lab">Niveaux
+            <a class="raccourci" @click="artf.tiers=[4,5,6,7,8]">tous</a></span>
+          <div class="cases">
+            <label v-for="t in [4,5,6,7,8]" :key="t"><input type="checkbox" :value="t" v-model="artf.tiers"> T{{ t }}</label>
+          </div>
+        </div>
+        <div class="champ">
+          <span class="lab">Matériau rendu
+            <a class="raccourci" @click="artf.matieres=RACINES_MAT.map(m=>m.cle)">tous</a></span>
+          <div class="cases">
+            <label v-for="m in RACINES_MAT" :key="m.cle"><input type="checkbox" :value="m.cle" v-model="artf.matieres"> {{ m.label }}</label>
+          </div>
+        </div>
+        <div class="champ">
+          <span class="lab">Lignée
+            <a class="raccourci" @click="artf.lignees=LIGNEES.map(l=>l.cle)">toutes</a></span>
+          <div class="cases">
+            <label v-for="l in LIGNEES_ART" :key="l.cle">
+              <input type="checkbox" :value="l.cle" v-model="artf.lignees"> {{ l.label }}</label>
+          </div>
+        </div>
+        <div class="champ">
+          <span class="lab">Recherche</span>
+          <input type="text" v-model="artf.recherche" placeholder="nom ou identifiant">
+        </div>
+        <div class="champ">
+          <span class="lab">Prix d'achat retenu</span>
+          <select v-model="artf.modeAchat">
+            <option v-for="m in MODES_ACHAT" :key="m.cle" :value="m.cle">{{ m.label }}</option>
+          </select>
+          <span class="statut">{{ (MODES_ACHAT.find(m=>m.cle===artf.modeAchat)||{}).aide }}</span>
+        </div>
+        <div class="champ">
+          <span class="lab">Unités rendues au recyclage</span>
+          <input type="number" v-model.number="artf.unites" min="1" max="30" step="1">
+          <span class="statut">Relevé en jeu : 10. Le wiki annonce 12-13, écart non tranché.
+            Le marché exige au moins 10 sans exclure 12-13.</span>
+        </div>
+        <div class="champ">
+          <span class="lab">Part du volume quotidien (%)</span>
+          <input type="number" v-model.number="artf.partVolume" min="1" max="100" step="1">
+          <span class="statut">Ce qu'on s'autorise à absorber du carnet, sur la jambe la plus étroite.</span>
+        </div>
+        <div class="champ">
+          <span class="lab">Volume minimal dans la ville d'achat</span>
+          <input type="number" v-model.number="artf.volumeMinAchat" min="0" step="1">
+          <span class="statut">Un ordre alléchant dans une ville où rien ne s'échange n'est pas une source.</span>
+        </div>
+        <div class="champ pleine">
+          <div class="cases">
+            <label><input type="checkbox" v-model="artf.memeVille"> Acheter et revendre dans la même ville (pas de trajet)</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="!artChargees" class="vide-msg">
+      Charge le marché pour voir le prix des 725 artéfacts, ce que chacun rend au recyclage,
+      et l'objet auquel il est lié.
+    </div>
+
+    <!-- ---------------------------- VUE A : artefacts ---------------------- -->
+    <template v-if="artChargees && artf.vue==='artefacts'">
+      <div class="carte" style="margin-bottom:12px">
+        <h3>Colonne de fabrication</h3>
+        <div class="carte-corps">
+          <div class="actions">
+            <button class="plat" v-if="!artFabCharge" @click="chargerFabrication(false)" :disabled="chargement">
+              Évaluer la fabrication ({{ fmt(estimationFab.items) }} objets, ~{{ estimationFab.secondes }} s)
+            </button>
+            <span class="statut" v-if="!artFabCharge">
+              Le même artéfact sert aux 5 enchantements : on retient le meilleur des cinq.
+              Tant que ce n'est pas chargé, la colonne « fabriquer » reste vide et le verdict ne la compte pas.
+            </span>
+            <span class="statut pos" v-else>Fabrication évaluée sur les 5 enchantements.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tablewrap">
+        <table class="tb">
+          <thead>
+            <tr>
+              <th class="g" @click="trierArt('nom')">Artéfact<span class="fl">{{ flecheArt('nom') }}</span></th>
+              <th class="g">Objet fabriqué</th>
+              <th @click="trierArt('prixAchat')">Achat<span class="fl">{{ flecheArt('prixAchat') }}</span></th>
+              <th class="g">Rend</th>
+              <th @click="trierArt('valeurRecyclage')">Recyclage vaut<span class="fl">{{ flecheArt('valeurRecyclage') }}</span></th>
+              <th @click="trierArt('coutMatiere')">Matière revient à<span class="fl">{{ flecheArt('coutMatiere') }}</span></th>
+              <th @click="trierArt('gain')">Gain / pièce<span class="fl">{{ flecheArt('gain') }}</span></th>
+              <th @click="trierArt('gainJour')">Gain / jour<span class="fl">{{ flecheArt('gainJour') }}</span></th>
+              <th class="g">Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="l in lignesArtAffichees" :key="l.id">
+              <td class="g">
+                <div class="objet">
+                  <img :src="rendu(l.id)" loading="lazy" @error="imgErr($event,l.id)" alt="">
+                  <div>
+                    <div class="nom">{{ l.nom }}</div>
+                    <div class="id">
+                      <span class="pastille t">T{{ l.tier }}</span>
+                      <span class="pastille">{{ labelLignee(l.lignee) }}</span> {{ l.id }}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td class="g">
+                <div class="nom">{{ l.nomObjet }}</div>
+                <div class="id" v-if="l.fabrication">
+                  meilleur en <b>.{{ l.fabrication.ench }}</b> · profit {{ fmtM(l.fabrication.profit) }}
+                </div>
+                <div class="id" v-else-if="!artFabCharge">non évalué</div>
+                <div class="id" v-else>aucun débouché rentable</div>
+              </td>
+              <td data-lab="Achat">
+                <div class="tnum">{{ fmtM(l.prixAchat) }}</div>
+                <div class="id">{{ l.manuel ? 'saisi' : l.lieuAchat }}</div>
+              </td>
+              <td class="g" data-lab="Rend">
+                <template v-if="l.matiere">
+                  {{ artf.unites }} × {{ l.nomMatiere }}<br>
+                  <span class="id">+ {{ fmt(l.silver) }} silver</span>
+                </template>
+                <span v-else-if="l.matiereWiki" class="na">non échangeable</span>
+                <span v-else class="na">donnée absente</span>
+              </td>
+              <td data-lab="Recyclage vaut">{{ fmtM(l.valeurRecyclage) }}</td>
+              <td data-lab="Matière revient à">
+                <div class="tnum" :class="profitClasse(l.economieMatiere)">{{ fmtM(l.coutMatiere) }}</div>
+                <div class="id" v-if="l.prixMarcheMatiere">marché {{ fmtM(l.prixMarcheMatiere) }}</div>
+              </td>
+              <td data-lab="Gain / pièce" :class="profitClasse(l.gain)">{{ signe(l.gain) }}</td>
+              <td data-lab="Gain / jour" :class="profitClasse(l.gainJour)">
+                <div class="tnum">{{ signe(l.gainJour) }}</div>
+                <div class="id" v-if="l.qteJour">{{ l.qteJour.toFixed(1) }}/j · {{ l.bride==='matiere' ? 'matière' : 'artéfact' }}</div>
+              </td>
+              <td class="g" data-lab="Verdict">
+                <span class="pastille" :class="{'avert-inline': l.verdict==='doute'}">{{ libelleVerdict(l.verdict) }}</span>
+                <div class="id" v-if="l.doute">{{ l.doute }}</div>
+                <div class="id" v-else-if="l.trajet && l.verdict==='revendre'">{{ l.trajet.de }} → {{ l.trajet.vers }}</div>
+                <div class="id" v-if="l.rendement!=null">rendement du marché {{ l.rendement.toFixed(1) }}</div>
+                <input type="number" class="tnum" style="width:100px;margin-top:4px"
+                       :value="manuelArt[l.id]" @input="manuelArt[l.id] = $event.target.value===''? undefined : +$event.target.value"
+                       placeholder="mon prix">
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pied" v-if="lignesArt.length">
+        <span>{{ fmt(lignesArtAffichees.length) }} sur {{ fmt(lignesArt.length) }} artéfacts —
+          <template v-for="(n,v) in resumeArt.par" :key="v">{{ libelleVerdict(v) }} {{ n }} · </template></span>
+        <button class="plat" v-if="lignesArtAffichees.length < lignesArt.length" @click="limiteArt += 100">Afficher 100 de plus</button>
+      </div>
+    </template>
+
+    <!-- ---------------------------- VUE B : bassins ------------------------ -->
+    <template v-if="artChargees && artf.vue==='bassins'">
+      <div class="bandeau avert">
+        Fondre ne donne pas la pièce qu'on demande : <b>50 unités tirent au hasard dans une branche</b>
+        (9 ou 10 pièces), 36 unités dans les trois réunies (28 pièces). La <b>médiane</b> est ce qui arrive ;
+        l'espérance est ce qui arriverait à la longue. L'uniformité du tirage est une hypothèse, pas une donnée publiée.
+      </div>
+      <div class="tablewrap">
+        <table class="tb">
+          <thead>
+            <tr>
+              <th class="g">Bassin</th>
+              <th>Coût d'une fonte</th>
+              <th>Médiane</th>
+              <th>Gain médian</th>
+              <th>Espérance</th>
+              <th>Pire</th>
+              <th>Meilleur</th>
+              <th class="g">Lisibilité</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="b in bassinsArt" :key="b.cle">
+              <td class="g">
+                <div class="nom">{{ b.nomMatiere }} — {{ b.branche==='toutes' ? 'les 3 branches' : b.branche }}</div>
+                <div class="id"><span class="pastille t">T{{ b.tier }}</span> {{ b.unitesFonte }} unités → 1 pièce parmi {{ b.n }}</div>
+              </td>
+              <td data-lab="Coût d'une fonte">{{ fmtM(b.cout) }}</td>
+              <td data-lab="Médiane">{{ fmtM(b.mediane) }}</td>
+              <td data-lab="Gain médian" :class="profitClasse(b.gainMedian)">{{ signe(b.gainMedian) }}</td>
+              <td data-lab="Espérance">{{ fmtM(b.esperance) }}</td>
+              <td data-lab="Pire">{{ fmtM(b.pire) }}</td>
+              <td data-lab="Meilleur">{{ fmtM(b.meilleur) }}</td>
+              <td class="g" data-lab="Lisibilité">
+                <span v-if="b.fontesPourFiabilite">{{ b.fontesPourFiabilite }} fontes avant que la moyenne veuille dire quelque chose</span>
+                <div class="id" v-if="b.partMuette>0">{{ fmtPct(b.partMuette) }} des tirages sans prix relevé</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="vide-msg" v-if="!bassinsArt.length">Aucun bassin ne correspond aux filtres.</div>
+    </template>
+
+    <!-- ---------------------------- VUE C : matieres ----------------------- -->
+    <template v-if="artChargees && artf.vue==='matieres'">
+      <div class="bandeau">
+        Le <b>plancher implicite</b> est le vrai apport de cette vue : c'est le prix auquel le meilleur
+        artéfact du marché, une fois recyclé, te sort la matière. Quand il passe sous le prix affiché,
+        acheter des artéfacts <b>est</b> la façon la moins chère d'obtenir la matière.
+      </div>
+      <div class="tablewrap">
+        <table class="tb">
+          <thead>
+            <tr>
+              <th class="g">Matériau</th>
+              <th>Achat</th>
+              <th>Transigé 7 j</th>
+              <th>Volume / jour</th>
+              <th>Plancher par recyclage</th>
+              <th>Écart</th>
+              <th class="g">Par quel artéfact</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in matieresArt" :key="m.id">
+              <td class="g">
+                <div class="objet">
+                  <img :src="rendu(m.id)" loading="lazy" @error="imgErr($event,m.id)" alt="">
+                  <div><div class="nom">{{ m.nom }}</div><div class="id">{{ m.id }}</div></div>
+                </div>
+              </td>
+              <td data-lab="Achat">
+                <div class="tnum">{{ fmtM(m.prix) }}</div><div class="id">{{ m.lieu }}</div>
+              </td>
+              <td data-lab="Transigé 7 j">{{ fmtM(m.transige) }}</td>
+              <td data-lab="Volume / jour">{{ fmt(m.volJour) }}</td>
+              <td data-lab="Plancher par recyclage">{{ m.plancher ? fmtM(m.plancher.cout) : '—' }}</td>
+              <td data-lab="Écart" :class="profitClasse(m.economie)">{{ signe(m.economie) }}</td>
+              <td class="g">{{ m.plancher ? m.plancher.nomVia : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="carte" style="margin-top:12px">
+        <h3>Transmutation</h3>
+        <div class="carte-corps">
+          <p>La fonderie transmute aussi : un tier vers le suivant, et une rareté vers la suivante.
+          <b>Je n'affiche pas de ratio parce que les sources se contredisent</b> — une page annonce 20 pour 1
+          en rareté, une autre dit que ce 20 pour 1 a été retiré en 2019. Inventer une constante ici
+          produirait des verdicts faux avec l'apparence de la précision.</p>
+          <p class="statut">Ce que le marché dit aujourd'hui, lui, est mesurable : au ratio de 5 pour 1 en tier,
+          seules deux conversions sur vingt sont bénéficiaires (éclat de cristal et éclat d'Avalon, T7 vers T8).
+          En rareté, la relique ne vaut que 3 fois l'âme : payer 20 âmes pour une relique perd 85 %,
+          ce qui en fait un puits à surplus, pas un arbitrage. Relève les ratios exacts sur l'écran de
+          la fonderie et je câblerai le calcul.</p>
+        </div>
+      </div>
+    </template>
+
+    <!-- ------------------------- VUE D : etalonnage ------------------------ -->
+    <template v-if="artChargees && artf.vue==='etalonnage'">
+      <div class="bandeau avert">
+        Ce tableau retourne la question : au lieu de croire le wiki, il demande au <b>marché</b> ce que
+        le recyclage rend vraiment. Le rendement implicite vaut
+        <b>(prix transigé de l'artéfact − silver) ÷ prix de la matière</b>. Il peut dépasser le rendu réel
+        sans problème — l'artéfact vaut alors plus cher comme ingrédient. Mais il ne peut pas être
+        <b>négatif</b> : cela voudrait dire qu'un artéfact se vend moins cher que le seul silver qu'il rapporte.
+        Un groupe à médiane négative ou à premier quartile négatif porte une donnée fausse.
+      </div>
+      <div class="tablewrap">
+        <table class="tb">
+          <thead>
+            <tr>
+              <th class="g">Groupe</th>
+              <th>Silver</th>
+              <th>Rendement médian</th>
+              <th>1<sup>er</sup> quartile</th>
+              <th>3<sup>e</sup> quartile</th>
+              <th>Sous le silver</th>
+              <th class="g">Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="g in etalonnage" :key="g.cle">
+              <td class="g"><span class="pastille t">T{{ g.tier }}</span> {{ g.racine }}</td>
+              <td data-lab="Silver">{{ fmt(g.silver) }}</td>
+              <td data-lab="Rendement médian">{{ g.mediane.toFixed(1) }}</td>
+              <td data-lab="1er quartile" :class="g.q1<0 ? 'neg' : ''">{{ g.q1.toFixed(1) }}</td>
+              <td data-lab="3e quartile">{{ g.q3.toFixed(1) }}</td>
+              <td data-lab="Sous le silver" :class="g.negatifs ? 'neg' : ''">{{ g.negatifs }} / {{ g.n }}</td>
+              <td class="g">
+                <span v-if="g.negatifs" class="avert-inline">donnée réfutée par le marché</span>
+                <span v-else-if="g.mediane < g.unites*0.6" class="avert-inline">rendement bas, à vérifier</span>
+                <span v-else class="pos">cohérent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="carte" style="margin-top:12px">
+        <h3>Ce qu'il reste à trancher en jeu</h3>
+        <div class="carte-corps">
+          <p><b>Recycle un artéfact et note ce que tu obtiens.</b> Trente secondes en jeu valent mieux que
+          toute cette statistique. Deux questions ouvertes :</p>
+          <p>1. <b>Combien d'unités ?</b> Tu dis 10, le wiki dit 12-13. Le marché exige au moins 10
+          et n'exclut pas 12-13.</p>
+          <p>2. <b>Le silver de la famille Avalon.</b> Les éclats d'Avalon T6 et T7 sortent avec un premier
+          quartile négatif, et 19 artéfacts s'y transigent sous leur seul silver — ce qui serait de l'argent
+          gratuit laissé sur la table pendant une semaine. Trois explications possibles : le silver du wiki
+          est faux, le recyclage coûte des frais de fonderie que personne ne documente, ou les artéfacts
+          d'Avalon ne se recyclent pas comme les autres. En attendant, ces lignes sont marquées
+          « données douteuses » et exclues du verdict.</p>
+        </div>
+      </div>
+    </template>
+
+  </template>
+
   <!-- ============================== REGLAGES ============================== -->
   <template v-if="onglet==='reglages'">
     <div class="reglages">
@@ -1143,8 +1488,10 @@
                 <label><input type="checkbox" v-model="r.focusFabrication"> Focus à la fabrication</label>
                 <label><input type="checkbox" v-model="r.focusRaffinage"> Focus au raffinage</label>
                 <label><input type="checkbox" v-model="r.autoriserRaffinage"> Autoriser le raffinage soi-même</label>
-                <label><input type="checkbox" v-model="r.autoriserArtefact"> Autoriser la fonte de runes en artefacts</label>
               </div>
+              <span class="statut">La fonte de runes n'est plus proposée comme moyen d'obtenir un artefact :
+                la fonderie rend une pièce <b>tirée au hasard</b>, on ne commande pas celle qu'on veut.
+                Un artefact vaut donc son prix d'achat. La fonte se juge pour elle-même dans l'onglet Artéfact.</span>
               <span class="statut">Le focus n'a pas de coût ici : sa consommation dépend de ta spécialisation,
                 donnée absente des fichiers du jeu. Il n'agit que sur le retour de ressources.</span>
             </div>
