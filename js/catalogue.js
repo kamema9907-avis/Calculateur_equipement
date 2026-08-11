@@ -57,6 +57,7 @@ export const LIGNEES = [
   { cle: 'AVALON',  label: 'Avalon',      couleur: '#7fb8e0' },
   { cle: 'CRYSTAL', label: 'Cristal',     couleur: '#9fe0e0' },
   { cle: 'ROYAL',   label: 'Royal',       couleur: '#e0b060' },
+  { cle: 'FEY',     label: 'Féerique',    couleur: '#8fd6a8' },
 ];
 
 // ---------------------------------------------------------------------------

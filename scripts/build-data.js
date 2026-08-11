@@ -116,7 +116,9 @@ const STATIONS_CIBLES = new Set(['warriors_forge', 'mages_tower', 'hunters_lodge
 const SLOTS = new Set(['2H', 'MAIN', 'OFF', 'HEAD', 'ARMOR', 'SHOES', 'CAPE', 'BACKPACK', 'BAG']);
 
 // Suffixes qui designent une lignee d'artefact plutot qu'un objet commun.
-const LIGNEES_ARTEFACT = new Set(['UNDEAD', 'HELL', 'KEEPER', 'MORGANA', 'AVALON', 'CRYSTAL', 'ROYAL']);
+// FEY manquait : les 225 recettes Feerique etaient classees « commun », donc
+// invisibles au filtre de lignee et affichees sans leur couleur.
+const LIGNEES_ARTEFACT = new Set(['UNDEAD', 'HELL', 'KEEPER', 'MORGANA', 'AVALON', 'CRYSTAL', 'ROYAL', 'FEY']);
 
 // Les 3 lignes d'armure du jeu, telles qu'elles apparaissent dans l'id.
 const LIGNES = { PLATE: 'plaque', LEATHER: 'cuir', CLOTH: 'tissu' };
@@ -490,6 +492,190 @@ fs.writeFileSync(OUT_FICHES, JSON.stringify({
   ordreQualites: ORDRE_QUALITES,
   ip, stats,
 }));
+
+// ---------------------------------------------------------------------------
+//  Artefacts : recyclage et bassins de fonte  (data/artefacts.json)
+//
+//  Trois choses que l'onglet Artefact doit savoir et que personne d'autre ne
+//  porte :
+//
+//   1. CE QUE REND LE RECYCLAGE. materials.json (wiki) donne pour chaque
+//      artefact le materiau rendu et le silver. `unique_name` y est nul PARTOUT
+//      (712 entrees sur 712) : la seule cle de jointure est le nom anglais.
+//
+//   2. LE SILVER. Il ne depend pas de l'artefact mais du couple
+//      (materiau, tier) — 25 valeurs. Recoupe : le wiki ecrit que recycler
+//      « Adept's Runed Rock » rend 96 silver, et notre table donne bien 96 pour
+//      (Rune, T4).
+//
+//   3. LES BASSINS DE FONTE. La fonderie ne vend pas la piece qu'on demande :
+//      elle en TIRE une au hasard. 50 unites tirent dans une branche
+//      (Guerrier / Mage / Chasseur, 9-10 pieces), 36 unites tirent dans les
+//      trois reunies (28 pieces). On aplatit donc les 60 groupes du dump en
+//      80 bassins : 5 tiers x 4 materiaux x (3 branches + « toutes »).
+//
+//  Seuls 25 materiaux sont NEGOCIABLES : T4..T8 x {RUNE, SOUL, RELIC,
+//  SHARD_AVALONIAN, SHARD_CRYSTAL}. Les familles wiki « Fey » et « Crystal »
+//  n'ont aucun item echangeable et un silver de 0 : leur recyclage n'est pas
+//  chiffrable, ce qui doit s'afficher comme tel et jamais comme un zero.
+// ---------------------------------------------------------------------------
+const UNITES_RECYCLAGE = 10;   // valeur relevee en jeu par Vigile ; le wiki dit 12-13
+const FONTE_BRANCHE = 50;
+const FONTE_TOUTES = 36;
+
+const wikiMateriaux = loadWiki('materials.json');
+
+// La jointure passe par `idDeNom()`, deja ecrit plus haut : il ecarte les
+// variantes enchantees et refuse les noms ambigus plutot que de deviner. Un
+// artefact n'existe qu'en niveau 0, il tombe donc toujours sur sa base.
+
+const MATIERES_NEGOCIABLES = new Set();
+for (const t of [4, 5, 6, 7, 8]) {
+  for (const m of ['RUNE', 'SOUL', 'RELIC', 'SHARD_AVALONIAN', 'SHARD_CRYSTAL']) {
+    MATIERES_NEGOCIABLES.add(`T${t}_${m}`);
+  }
+}
+
+// `salvage_mat` compte SEPT racines, pas cinq : Rune, Ame, Relique, Eclat
+// d'Avalon, Eclat de cristal, plus « Crystal » (15) et « Fey » (46) qui ne
+// correspondent a aucun item echangeable.
+//
+// Les 15 « Crystal » sont exactement 3 pieces par tier — Arclight Blasters,
+// Forgebark Staff, Flamewalker Staff — toutes de la lignee CRYSTAL, dont les
+// 17 voisines du meme tier disent « Crystal Shard ». C'est une troncature du
+// wiki, pas un materiau distinct : on les rattache aux eclats de cristal.
+// Verification independante : leurs identifiants se terminent tous par
+// _CRYSTAL, et aucun item « Adept's Crystal » n'existe dans les 11 218 noms.
+const RACINE_TRONQUEE = /^(Adept|Expert|Master|Grandmaster|Elder)'s Crystal$/;
+const idMateriauDeNom = (nom, idArt) => {
+  if (RACINE_TRONQUEE.test(nom) && idArt.endsWith('_CRYSTAL')) {
+    return `T${idArt.slice(1, 2)}_SHARD_CRYSTAL`;
+  }
+  return idDeNom(nom);
+};
+
+// Ce que le wiki sait du recyclage, indexe par identifiant d'artefact.
+const recyclageParId = {};
+for (const m of wikiMateriaux) {
+  const idArt = idDeNom(m.nom_page);
+  if (!idArt) continue;
+  const idMat = idMateriauDeNom(m.salvage_mat, idArt);
+  recyclageParId[idArt] = {
+    matiere: idMat && MATIERES_NEGOCIABLES.has(idMat) ? idMat : null,
+    matiereWiki: m.salvage_mat,
+    silver: m.salvage_silver || 0,
+    famille: m.artifact_family || null,
+    // Le wiki donne « 12-13 » partout ; on garde la mention brute pour pouvoir
+    // afficher l'ecart avec la valeur relevee en jeu, sans la trancher ici.
+    qteWiki: m.salvage_mat_qty || null,
+  };
+}
+
+// Quel objet chaque artefact fabrique. Nos recettes le disent mieux que le wiki :
+// chaque artefact sert a EXACTEMENT 5 recettes, les 5 enchantements d'un meme
+// objet de base. La relation est donc 1:1 avec l'objet, pas avec la recette.
+const objetParArtefact = {};
+for (const r of Object.values(includedRecipes)) {
+  for (const i of r.ingredients) {
+    if (!i.id.includes('ARTEFACT')) continue;
+    const base = r.id.split('@')[0];
+    (objetParArtefact[i.id] || (objetParArtefact[i.id] = new Set())).add(base);
+  }
+}
+
+// Les 80 bassins de fonte.
+const bassins = {};
+const bassinParArtefact = {};
+for (const branche of ['warrior', 'mage', 'hunter']) {
+  for (const groupe of (foundry[branche] || [])) {
+    for (const cle of [`${groupe.tier}|${groupe.runeId}|${branche}`,
+                       `${groupe.tier}|${groupe.runeId}|toutes`]) {
+      const b = bassins[cle] || (bassins[cle] = {
+        tier: groupe.tier,
+        matiere: groupe.runeId,
+        branche: cle.endsWith('|toutes') ? 'toutes' : branche,
+        cout: cle.endsWith('|toutes') ? FONTE_TOUTES : FONTE_BRANCHE,
+        artefacts: [],
+      });
+      for (const a of groupe.artefacts) if (objetParArtefact[a]) b.artefacts.push(a);
+    }
+    for (const a of groupe.artefacts) {
+      if (objetParArtefact[a]) bassinParArtefact[a] = `${groupe.tier}|${groupe.runeId}|${branche}`;
+    }
+  }
+}
+// Un bassin vide de tout artefact de notre perimetre n'a rien a dire.
+for (const cle of Object.keys(bassins)) if (!bassins[cle].artefacts.length) delete bassins[cle];
+
+const artefactsDetail = {};
+let nbRecyclables = 0, nbNonChiffrables = 0, nbSansDonnees = 0;
+for (const idArt of Object.keys(objetParArtefact)) {
+  const objets = [...objetParArtefact[idArt]];
+  const rec = recyclageParId[idArt] || null;
+  const suffixe = idArt.split('_').pop();
+  const tier = parseInt(idArt.slice(1, 2), 10);
+
+  if (!rec) nbSansDonnees++;
+  else if (rec.matiere) nbRecyclables++;
+  else nbNonChiffrables++;
+
+  artefactsDetail[idArt] = {
+    objet: objets[0],
+    // Un artefact qui servirait a deux objets casserait la lecture « 1:1 » du
+    // tableau : on le signale plutot que de choisir en silence.
+    objetsMultiples: objets.length > 1 ? objets : undefined,
+    tier,
+    lignee: suffixe,
+    famille: rec ? rec.famille : null,
+    matiere: rec ? rec.matiere : null,
+    matiereWiki: rec ? rec.matiereWiki : null,
+    silver: rec ? rec.silver : null,
+    qteWiki: rec ? rec.qteWiki : null,
+    bassin: bassinParArtefact[idArt] || null,
+  };
+}
+
+// Garde-fou. Un SEUIL de couverture serait le mauvais outil : la couverture est
+// de 705/725 par construction et le restera, puisque les 20 manquants sont un
+// contenu que ni le wiki d'aout 2026 ni le dump de juin ne connaissent. Un
+// seuil ne distinguerait donc pas « toujours les memes 20 » d'un renommage
+// cote wiki qui en casserait 20 autres. On nomme donc les absents attendus :
+// tout ecart, dans un sens comme dans l'autre, arrete la generation.
+const ABSENTS_ATTENDUS = new Set();
+for (const t of [4, 5, 6, 7, 8]) {
+  for (const l of ['MORGANA', 'HELL', 'KEEPER', 'AVALON']) {
+    ABSENTS_ATTENDUS.add(`T${t}_ARTEFACT_2H_SHAPESHIFTER_${l}`);
+  }
+}
+const totalArtefacts = Object.keys(artefactsDetail).length;
+const absents = Object.keys(artefactsDetail).filter(id => !recyclageParId[id]);
+const inattendus = absents.filter(id => !ABSENTS_ATTENDUS.has(id));
+const reapparus = [...ABSENTS_ATTENDUS].filter(id => artefactsDetail[id] && recyclageParId[id]);
+if (inattendus.length) {
+  console.error(`ECHEC : ${inattendus.length} artefacts sans donnees de recyclage en dehors des ` +
+                `metamorphes connus. La jointure par nom anglais est cassee.\n  ` +
+                inattendus.slice(0, 10).join('\n  '));
+  process.exit(1);
+}
+if (reapparus.length) {
+  console.log(`Note : ${reapparus.length} metamorphes ont desormais des donnees wiki ` +
+              `— retirer ABSENTS_ATTENDUS de build-data.js.`);
+}
+
+const OUT_ARTEFACTS = path.resolve(__dirname, '..', 'data', 'artefacts.json');
+fs.writeFileSync(OUT_ARTEFACTS, JSON.stringify({
+  generatedAt: new Date().toISOString(),
+  source: 'wiki Albion (materials.json) + dump fonderie (artefact_foundry.json)',
+  unitesRecyclage: UNITES_RECYCLAGE,
+  fonte: { branche: FONTE_BRANCHE, toutes: FONTE_TOUTES },
+  materiaux: [...MATIERES_NEGOCIABLES],
+  artefacts: artefactsDetail,
+  bassins,
+}));
+
+console.log(`Artefacts : ${totalArtefacts} au total — ${nbRecyclables} recyclables, ` +
+            `${nbNonChiffrables} sans matiere negociable, ${nbSansDonnees} sans donnees, ` +
+            `${Object.keys(bassins).length} bassins de fonte`);
 
 // ---------------------------------------------------------------------------
 //  Economie

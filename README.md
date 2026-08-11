@@ -235,6 +235,106 @@ sont donc pas extrapolées.
 
 ---
 
+## 💎 L'onglet « Artéfact »
+
+Le marché des artéfacts eux-mêmes : leur prix, l'objet auquel chacun est lié, et le
+choix entre **acheter pour produire**, **recycler pour récolter la matière**, ou
+**revendre**. 725 artéfacts, 25 matériaux, un chargement d'environ 15 secondes.
+
+### Ce qu'un artéfact rend au recyclage
+
+**10 unités de son matériau, plus un montant fixe de silver.** Le silver ne dépend pas
+de l'artéfact mais du couple (matériau, tier) :
+
+| Matériau | T4 | T5 | T6 | T7 | T8 |
+|---|---|---|---|---|---|
+| Rune | 96 | 192 | 384 | 768 | 1 524 |
+| Âme | 288 | 576 | 1 152 | 2 292 | 4 572 |
+| Relique | 672 | 1 344 | 2 676 | 5 340 | 10 668 |
+| Éclat d'Avalon | 1 440 | 2 868 | 5 760 | 11 520 | 23 040 |
+| Éclat de cristal | 0 | 0 | 0 | 0 | 0 |
+
+La colonne qui porte le sujet est **« la matière revient à »** :
+
+```
+coût d'une unité de matériau = (prix de l'artéfact − silver rendu) / 10
+```
+
+à comparer au prix d'achat du matériau au marché. Quand elle est plus basse, acheter
+des artéfacts **est** la façon la moins chère d'obtenir la rune. Le silver compte
+directement : il abaisse ce coût de revient.
+
+Deux conventions à ne pas mélanger, et la page les sépare : **revendre** la matière paie
+la taxe, **s'en servir** n'en paie aucune. Le coût de revient se compare donc au prix
+d'**achat** du matériau, jamais à son prix net de revente.
+
+### Fondre est un tirage au sort
+
+**50 unités du matériau donnent un artéfact au hasard** parmi les 9 ou 10 d'une branche
+(Guerrier / Mage / Chasseur), 36 unités un tirage parmi les 28 des trois branches
+réunies. Ce n'est donc **pas** un moyen d'obtenir la pièce qu'on veut, et l'outil ne le
+propose plus comme tel — voir « Ce qui a changé » plus bas.
+
+La vue **Bassins de fonte** juge les 80 bassins en espérance. Elle affiche la **médiane
+avant la moyenne** : sur le bassin Guerrier / T6 / Relique, l'espérance vaut plus de
+trois fois la médiane parce qu'une seule pièce porte tout le panier. Elle indique aussi
+combien de fontes il faut avant que la moyenne observée veuille dire quelque chose —
+souvent plus de cent.
+
+L'uniformité du tirage sur les 9-10 pièces est une **hypothèse**, pas une donnée publiée.
+
+### La vue « Étalonnage » — le marché juge nos données
+
+C'est le garde-fou de l'onglet. Pour chaque groupe (matériau, tier), il calcule le
+**rendement implicite** :
+
+```
+R = (prix transigé de l'artéfact − silver) / prix transigé du matériau
+```
+
+Si le marché arbitrait parfaitement, R vaudrait le rendu. Il peut le dépasser sans
+problème — l'artéfact vaut alors plus cher comme ingrédient que comme matière première.
+Mais **R ne peut pas être négatif** : cela voudrait dire qu'un artéfact se vend moins
+cher que le seul silver qu'il rapporte, donc de l'argent gratuit qui persisterait des
+jours. Un groupe à quartile négatif porte une donnée fausse, et l'outil le dit au lieu
+de conclure.
+
+Relevé du 11 août 2026 : les groupes profonds se serrent entre **6,7 et 10,4**, ce qui
+exige un rendu d'au moins 10. **L'Éclat d'Avalon T6 et T7 sort à 5,1 et 3,2 avec un
+premier quartile négatif**, et 19 artéfacts s'y transigent sous leur seul silver. Ces
+lignes sont marquées « données douteuses » et **exclues du verdict**.
+
+### Le volume borne l'achat, pas la revente
+
+L'opération a deux jambes, et elles ne sont pas du même ordre : `T6_RELIC` s'échange
+308 000 fois par jour quand l'artéfact qui le rend s'échange 50 fois. La colonne
+**« gain / jour »** applique donc le plafond de 10 % du volume quotidien **au minimum
+des deux jambes**, et dit laquelle mord. Une marge de 34 % sur cinq pièces par jour se
+lit ainsi comme 32 000 silver quotidiens, pas comme un pourcentage flatteur.
+
+### Verdict à cinq états
+
+**Recycler**, **fabriquer**, **revendre**, **rien**, et **données douteuses**. Le
+dernier n'est pas un « rien » : il dit de vérifier, pas de passer son chemin.
+
+« Revendre » signale le **trajet** quand la ville d'achat n'est pas la ville de vente,
+et un réglage permet de n'accepter que ce qui se fait sur place.
+
+### Ce qui a changé dans le reste de l'outil
+
+L'outil proposait jusqu'ici « fondre des runes » à `50 × prix du matériau` pour obtenir
+l'artéfact **voulu**. C'était faux, et cher : mesuré le 11 août sur 559 artéfacts cotés
+des deux côtés, **113 (20 %) étaient sous-évalués**, de 46 766 silver en moyenne. Pire
+cas, `T8_ARTEFACT_SHOES_LEATHER_AVALON` : 249 800 au lieu de 859 999. Chaque artéfact
+servant à 5 recettes, **565 recettes affichaient un profit fantôme** dans Repérage,
+Tableau, Ma banque et Fiche objet.
+
+**Un artéfact vaut désormais son prix d'achat**, avec sa ville, et une saisie manuelle
+est possible sur chaque ligne. Les marges affichées sur les recettes à artéfact ont donc
+baissé : c'est une correction, pas une régression.
+
+---
+
 ## 🧮 Comment fonctionne le calcul
 
 ### Coût d'un ingrédient
@@ -364,6 +464,18 @@ pour vendre immédiatement, on n'a personne à sous-coter.
 
 Les règles 2 et 3 ne s'activent qu'après l'analyse fine, faute d'historique avant.
 
+### Et le garde-fou symétrique, sur le prix d'achat
+
+Les trois règles ci-dessus protègent la jambe **vente**. Quand on **achète** — ce que
+fait tout l'onglet Artéfact — le danger s'inverse : à la vente le piège est un prix
+affiché trop **haut**, à l'achat c'est un prix trop **bas**, une aubaine fantôme qui
+fabrique de faux verdicts. Mesuré : 12 artéfacts sur 524 se demandent sous la moitié de
+leur prix réellement transigé.
+
+L'onglet Artéfact retient donc par défaut **le plus prudent des deux** prix — l'affiché
+ou le transigé — et écarte une ville d'achat où **rien ne s'échange** ou dont le volume
+tombe sous le seuil. Le mode reste réglable : prix affiché, prix transigé, ou prudent.
+
 ### Qualités
 
 Fabriquer ne produit pas que de la qualité Normale. Tu règles la répartition attendue
@@ -424,17 +536,19 @@ recevrait le taux de base sans que rien ne le signale.
 ## 📁 Structure
 
 ```
-index.html               HTML, CSS et les trois vues
+index.html               HTML, CSS et les six onglets
 js/catalogue.js          Vocabulaire de l'interface, formatage FR
 js/villes.js             Villes et table des bonus, éditable et persistée
-js/moteur.js             Coût récursif : acheter / raffiner / fabriquer / fondre
+js/moteur.js             Coût récursif : acheter / raffiner / fabriquer
 js/marche.js             API prix et historique, cache IndexedDB
 js/debouches.js          Les quatre canaux de vente, garde-fous, pondération qualité
 js/inventaire.js         Le stock : saisie, persistance, focus, puisage
 js/solveur.js            Allocation sous contraintes de l'onglet Ma banque
+js/artefacts.js          Recyclage, bassins de fonte, rendement implicite
 js/app.js                État, filtres, vues
 data/equipment-data.json Données générées (3,4 Mo)
 data/fiches.json         Item Power et caractéristiques (511 Ko)
+data/artefacts.json      Recyclage et bassins de fonte (212 Ko)
 scripts/build-data.js    Générateur depuis la librairie voisine
 Lancer.bat               Lance serveur + navigateur (Windows)
 .nojekyll                Désactive Jekyll sur GitHub Pages
@@ -520,3 +634,25 @@ voir d'un coup d'œil qu'aucune ville n'est anormalement chargée.
   additionne les deux sans compter le trajet.
 - **Concurrence** : albion-online-data est public. Les marchés liquides sont scrutés
   par beaucoup de joueurs avec exactement les mêmes chiffres.
+
+### Sur les artéfacts, deux questions ouvertes
+
+- **10 unités contre 12-13.** Vigile relève 10 en jeu, le wiki annonce 12-13. Le marché
+  tranche partiellement : le rendement implicite exige **au moins 10**, mais n'exclut
+  pas 12-13. La valeur est un réglage, défaut 10. **Un seul recyclage en jeu suffirait
+  à trancher.**
+- **Le silver de la famille Avalon est réfuté par le marché.** Éclat d'Avalon T6 et T7 :
+  premier quartile négatif, 19 artéfacts transigés sous leur seul silver. Trois
+  explications possibles, non départagées : le silver du wiki est faux, le recyclage
+  coûte des frais de fonderie que personne ne documente, ou les artéfacts d'Avalon ne se
+  recyclent pas comme les autres. Ces lignes sont exclues du verdict en attendant.
+- **Les ratios de transmutation ne sont pas câblés.** Les sources publiques se
+  contredisent : une page annonce 20 pour 1 en rareté, une autre dit que ce 20 pour 1 a
+  été retiré en 2019. Rien n'est inventé ; l'écran de la fonderie donnera les vrais.
+- **20 artéfacts Métamorphe** (Morgane, Démon, Gardien, Avalon) manquent aux deux
+  sources : contenu postérieur au wiki d'août 2026 et au dump de juin. Lignes affichées
+  vides plutôt que devinées.
+- **45 artéfacts Féeriques** n'ont aucun matériau échangeable à la sortie : leur
+  recyclage n'est pas chiffrable, ce qui s'affiche comme tel et jamais comme un zéro.
+- **20 jetons de faction** (`T*_ARTEFACT_TOKEN_FAVOR_*`, jusqu'à 700 000 silver) se
+  négocient mais ne servent à aucune recette du catalogue : ils sont hors de cet onglet.

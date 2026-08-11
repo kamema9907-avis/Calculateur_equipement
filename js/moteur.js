@@ -49,7 +49,6 @@ const POINTS_FOCUS = 59;
 //
 //  ctx = {
 //    byId,               // { itemId: recette }
-//    artefacts,          // { artefactId: { runeId, runeQty } }
 //    prices,             // { itemId: { lieu: { q: { sell, buy, ageH } } } }
 //    manual,             // { itemId: prix force a la main }
 //    villesAchat,        // string[] : ou l'on accepte d'acheter
@@ -61,7 +60,6 @@ const POINTS_FOCUS = 59;
 //    eventBonus,         // 0 | 10 | 20  (evenement de retour de ressources)
 //    tarifStation,       // silver pour 100 de nutrition
 //    autoriserRaffinage, // false => on achete toujours les ressources raffinees
-//    autoriserArtefact,  // false => on achete toujours les artefacts
 //    maxAgeH,            // null = pas de filtre, sinon age max du prix
 //    cache, enCours,     // memoisation, cf. creerContexte()
 //  }
@@ -217,17 +215,19 @@ export function voiesPour(id, ctx) {
     }
   }
 
-  // Un artefact s'achete, ou se fabrique a la fonderie en fondant des runes.
-  const a = ctx.artefacts[id];
-  if (a && ctx.autoriserArtefact) {
-    const rune = meilleurAchat(a.runeId, ctx);
-    if (rune) {
-      voies.push({
-        methode: 'runes', cost: rune.price * a.runeQty,
-        where: `${a.runeQty} × ${a.runeId} (${rune.where})`,
-      });
-    }
-  }
+  // Un artefact ne s'obtient QUE par achat. La fonderie n'est pas une voie
+  // d'approvisionnement : 50 unites du materiau y donnent un artefact TIRE AU
+  // HASARD parmi les 9-10 d'une branche (36 unites pour un tirage parmi les 28
+  // des trois branches reunies). On ne peut donc pas commander la piece voulue.
+  //
+  // Le code chiffrait autrefois « fondre des runes » a 50 x prix du materiau
+  // pour l'artefact PRECIS demande. Mesure le 11 aout 2026 sur 559 artefacts
+  // cotes des deux cotes : 113 d'entre eux (20 %) etaient ainsi sous-evalues,
+  // de 46 766 silver en moyenne. Pire cas, T8_ARTEFACT_SHOES_LEATHER_AVALON :
+  // 249 800 au lieu de 859 999, soit 610 199 silver d'economie imaginaire. Comme
+  // chaque artefact sert a 5 recettes, 565 recettes affichaient un profit
+  // fantome. La fonte reste une activite rentable en soi, mais elle se juge sur
+  // l'esperance d'un tirage : c'est l'objet de l'onglet Artefact.
 
   return voies;
 }
@@ -322,12 +322,6 @@ export function courses(recetteId, qte, ctx, acc = {}, seen = new Set()) {
 
     if (c.methode === 'raffiner' || c.methode === 'fabriquer') {
       courses(ing.id, besoin, ctx, acc, s2);
-    } else if (c.methode === 'runes') {
-      const a = ctx.artefacts[ing.id];
-      const rune = meilleurAchat(a.runeId, ctx);
-      const cle = a.runeId + '|' + (rune ? rune.where : '?');
-      if (!acc[cle]) acc[cle] = { id: a.runeId, where: rune && rune.where, qte: 0, prixU: rune ? rune.price : 0 };
-      acc[cle].qte += besoin * a.runeQty;
     } else {
       const cle = ing.id + '|' + c.where;
       if (!acc[cle]) acc[cle] = { id: ing.id, where: c.where, qte: 0, prixU: c.cost };
