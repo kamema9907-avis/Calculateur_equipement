@@ -201,9 +201,12 @@ const app = createApp({
           .then(x => x.json())
           .then(ax => {
             cataArt = ax;
-            // Le rendu par defaut vient des donnees, pas d'une constante figee
-            // dans l'interface : c'est build-data.js qui porte la valeur relevee.
-            if (ax.unitesRecyclage) artf.unites = ax.unitesRecyclage;
+            // Le rendu et le bareme viennent des donnees, pas de constantes
+            // figees dans l'interface. On ne les impose PAS si l'utilisateur a
+            // deja saisi les siens : sa mesure en jeu prime sur le defaut livre.
+            if (ax.unitesRecyclage && artf.unites == null) artf.unites = ax.unitesRecyclage;
+            if (ax.bareme && !artf.bareme) artf.bareme = JSON.parse(JSON.stringify(ax.bareme));
+            baremeLivre = ax.bareme || null;
             versionArt.value++;
           })
           .catch(() => { erreur.value = 'data/artefacts.json est introuvable — relance scripts/build-data.js.'; });
@@ -1128,14 +1131,21 @@ const app = createApp({
       villesAchat: [...V.VILLES],
       villesVente: [...V.VILLES],
       modeAchat: 'prudent',
-      unites: Art.UNITES_DEFAUT,
+      // null a l'ouverture : c'est le fichier genere qui fournit la valeur, et
+      // une valeur deja persistee par l'utilisateur la garde.
+      unites: null,
       partVolume: 10,
       volumeMinAchat: 1,
       // Le moteur achete au moins cher et vend au mieux, sans rien qui force
       // les deux villes a etre la meme : 12 % des verdicts supposent donc un
       // trajet. Ce garde-fou permet de ne garder que ce qui se fait sur place.
       memeVille: false,
-      // Surcharges d'etalonnage, par racine de matiere ou par « racine|tier ».
+      // Le bareme de silver, releve en jeu. Pre-rempli par le fichier genere,
+      // modifiable ici et persiste : le joueur n'a rien a saisir pour demarrer,
+      // et un changement de bareme du jeu ne demande pas de toucher au code.
+      bareme: null,
+      // Surcharges fines : par racine de matiere, « racine|tier », ou
+      // « racine|tier|emplacement ».
       unitesPar: {},
       silverPar: {},
     });
@@ -1156,6 +1166,34 @@ const app = createApp({
 
     // Le catalogue d'artefacts, charge avec le reste.
     let cataArt = { artefacts: {}, bassins: {}, materiaux: [] };
+    let baremeLivre = null;   // le bareme d'origine, pour pouvoir y revenir
+
+    // La table de silver affichee dans les Reglages : les 4 x 5 x 4 montants
+    // deduits, pour que le joueur puisse confronter chaque case a son jeu.
+    const tableSilver = computed(() => {
+      const b = artf.bareme;
+      if (!b) return [];
+      const EMPL = [
+        { cle: 'HEAD', label: 'Tête, pieds, secondaire' },
+        { cle: 'ARMOR', label: 'Poitrine' },
+        { cle: 'MAIN', label: 'Arme à 1 main' },
+        { cle: '2H', label: 'Arme à 2 mains' },
+      ];
+      return Object.keys(b.bases).map(rac => ({
+        racine: rac,
+        base: b.bases[rac],
+        lignes: EMPL.map(e => ({
+          ...e,
+          facteur: b.facteurs[e.cle],
+          parTier: [4, 5, 6, 7, 8].map(t =>
+            b.bases[rac] * b.facteurs[e.cle] * Math.pow(b.parTier || 2, t - 4)),
+        })),
+      }));
+    });
+
+    function reinitialiserBareme() {
+      if (baremeLivre) artf.bareme = JSON.parse(JSON.stringify(baremeLivre));
+    }
 
     const ctxArt = () => ({
       prix: prixArt, histo: histoArt,
@@ -1164,6 +1202,7 @@ const app = createApp({
       taxeOrdre: eco.value.ordre, taxeInstant: eco.value.instant,
       manuel: manuelArt, modeAchat: artf.modeAchat,
       unites: artf.unites, unitesPar: artf.unitesPar, silverPar: artf.silverPar,
+      bareme: artf.bareme,
       volumeMinAchat: artf.volumeMinAchat, partVolume: artf.partVolume,
     });
 
@@ -1321,9 +1360,12 @@ const app = createApp({
           affiche: achat ? achat.affiche : null,
           transigeArt: achat ? achat.transige : null,
           manuel: achat ? achat.manuel : false,
-          valeurRecyclage: rec ? rec.valeurRevente : null,
-          gainRecyclage: rec ? rec.gainRevente : null,
-          margeRecyclage: rec ? rec.margeRevente : null,
+          bilan: rec ? rec.bilan : null,
+          gainRecyclage: rec ? rec.gain : null,
+          margeRecyclage: rec ? rec.marge : null,
+          valeurRevente: rec ? rec.valeurRevente : null,
+          lieuMatiere: rec ? rec.lieuMatiere : null,
+          emplacement: base.emplacement,
           coutMatiere: rec ? rec.coutMatiere : null,
           prixMarcheMatiere: rec ? rec.prixMarcheMatiere : null,
           economieMatiere: rec ? rec.economieMatiere : null,
@@ -1503,6 +1545,7 @@ const app = createApp({
       artf, triArt, limiteArt, manuelArt, artChargees, artFabCharge,
       lignesArt, lignesArtAffichees, bassinsArt, matieresArt, etalonnage, resumeArt,
       estimationFab, chargerArtefacts, chargerFabrication, trierArt, flecheArt,
+      tableSilver, reinitialiserBareme,
       MODES_ACHAT: Art.MODES_ACHAT, DOUTES: Art.DOUTES,
       // Filtre en amont : un `v-for` porteur d'un `v-if` sur le meme element
       // s'evalue a l'envers en Vue 3.

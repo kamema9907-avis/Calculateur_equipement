@@ -243,30 +243,61 @@ choix entre **acheter pour produire**, **recycler pour récolter la matière**, 
 
 ### Ce qu'un artéfact rend au recyclage
 
-**10 unités de son matériau, plus un montant fixe de silver.** Le silver ne dépend pas
-de l'artéfact mais du couple (matériau, tier) :
-
-| Matériau | T4 | T5 | T6 | T7 | T8 |
-|---|---|---|---|---|---|
-| Rune | 96 | 192 | 384 | 768 | 1 524 |
-| Âme | 288 | 576 | 1 152 | 2 292 | 4 572 |
-| Relique | 672 | 1 344 | 2 676 | 5 340 | 10 668 |
-| Éclat d'Avalon | 1 440 | 2 868 | 5 760 | 11 520 | 23 040 |
-| Éclat de cristal | 0 | 0 | 0 | 0 | 0 |
-
-La colonne qui porte le sujet est **« la matière revient à »** :
+**10 unités de son matériau, plus du silver.** Le silver dépend de trois choses :
 
 ```
-coût d'une unité de matériau = (prix de l'artéfact − silver rendu) / 10
+silver = base(matériau) × facteur(emplacement) × 2^(tier − 4)
 ```
 
-à comparer au prix d'achat du matériau au marché. Quand elle est plus basse, acheter
-des artéfacts **est** la façon la moins chère d'obtenir la rune. Le silver compte
-directement : il abaisse ce coût de revient.
+| Base à T4 | Rune | Âme | Relique | Éclat d'Avalon |
+|---|---|---|---|---|
+| | 21 | 62 | 145 | 311 |
 
-Deux conventions à ne pas mélanger, et la page les sépare : **revendre** la matière paie
-la taxe, **s'en servir** n'en paie aucune. Le coût de revient se compare donc au prix
-d'**achat** du matériau, jamais à son prix net de revente.
+| Facteur | Tête, pieds, secondaire | Poitrine | Arme à 1 main | Arme à 2 mains |
+|---|---|---|---|---|
+| | ×1 | ×2 | **×3** | ×4 |
+
+Une rune T4 rend donc 21 sur des bottes, 42 sur un plastron, 63 sur une arme à une main,
+84 sur une arme à deux mains. Chaque tier double.
+
+**Le wiki ne publie qu'un montant par (matériau, tier), et c'est celui des armes à deux
+mains.** Le rapport entre l'ancienne valeur unique et le nouveau ×4 est quasi constant :
+84/96 = 0,875 · 248/288 = 0,861 · 580/672 = 0,863 · 1244/1440 = 0,864. L'appliquer aux
+casques, bottes et boucliers les **surévaluait d'un facteur quatre**, sur 195 artéfacts.
+
+Le ×3 de l'arme à une main a été confronté au marché. Un artéfact ne pouvant pas se
+vendre durablement sous le silver de son recyclage, on compte les impossibilités sur
+420 artéfacts cotés hors Avalon : ×2 en donne 1, **×3 en donne 1**, ×4 en donne 4. Le ×3
+passe, le ×4 est réfuté. La plus basse arme à une main rune se transige à 3,3 fois sa
+base — au-dessus de ×3, sous ×4.
+
+Contrôle de cohérence du modèle entier : la hallebarde de Morgane T4 (arme à deux mains,
+939 ventes par jour) se transige à **83** pour un plancher de **84**.
+
+Le barème est **câblé par défaut et modifiable** dans la vue Étalonnage : rien à saisir
+pour démarrer, et un changement de barème du jeu ne demande pas de toucher au code.
+
+### La formule de décision
+
+```
+bilan = prix de l'artéfact  −  silver rendu  −  10 × prix bas du matériau
+                                                       ↓
+                                         négatif  =  bonne affaire
+```
+
+**Aucune taxe** : la matière est gardée pour refondre, elle n'est jamais vendue. Elle
+vaut donc ce qu'elle aurait coûté à l'achat, pas ce qu'elle rapporterait à la revente.
+La colonne **« la matière revient à »** dit la même chose autrement,
+`(prix de l'artéfact − silver) / 10`, à comparer au prix marché.
+
+**Deux traitements opposés du prix, et c'est voulu.** Sur l'**artéfact** on retient le
+prix *prudent* — un ordre anormalement bas gonflerait le gain. Sur la **matière** on
+retient le prix *bas* — un ordre bas y réduit le gain. Les deux règles vont dans le sens
+de la prudence.
+
+Une seconde colonne donne quand même la revente de la matière, taxe comprise, pour qui
+change de stratégie. Confondre les deux retirerait 4 à 6,5 % à une opération où l'on n'a
+jamais vendu.
 
 ### Fondre est un tirage au sort
 
@@ -299,10 +330,15 @@ cher que le seul silver qu'il rapporte, donc de l'argent gratuit qui persisterai
 jours. Un groupe à quartile négatif porte une donnée fausse, et l'outil le dit au lieu
 de conclure.
 
-Relevé du 11 août 2026 : les groupes profonds se serrent entre **6,7 et 10,4**, ce qui
-exige un rendu d'au moins 10. **L'Éclat d'Avalon T6 et T7 sort à 5,1 et 3,2 avec un
-premier quartile négatif**, et 19 artéfacts s'y transigent sous leur seul silver. Ces
-lignes sont marquées « données douteuses » et **exclues du verdict**.
+C'est ce garde-fou qui a fait remonter l'erreur de barème. Avec la valeur unique du wiki,
+**29 artéfacts sur 560** se transigeaient sous leur propre silver — impossible. Avec le
+barème par emplacement, il n'en reste **11**, dont 10 dans la seule famille Avalon.
+
+Cette famille reste donc suspecte, et le doute se propage au **groupe entier** pour tout
+calcul dérivé : une fonte multiplie par 50 l'erreur sur le coût d'une unité. Sans cette
+règle, les bassins d'Avalon ressortaient en tête du classement — non parce qu'ils sont
+bons, mais parce que leur donnée est fausse. Le nombre de bassins rentables tombe ainsi
+de 17 à 4. C'est la bonne réponse, pas la flatteuse.
 
 ### Le volume borne l'achat, pas la revente
 
@@ -637,15 +673,15 @@ voir d'un coup d'œil qu'aucune ville n'est anormalement chargée.
 
 ### Sur les artéfacts, deux questions ouvertes
 
-- **10 unités contre 12-13.** Vigile relève 10 en jeu, le wiki annonce 12-13. Le marché
-  tranche partiellement : le rendement implicite exige **au moins 10**, mais n'exclut
-  pas 12-13. La valeur est un réglage, défaut 10. **Un seul recyclage en jeu suffirait
-  à trancher.**
-- **Le silver de la famille Avalon est réfuté par le marché.** Éclat d'Avalon T6 et T7 :
-  premier quartile négatif, 19 artéfacts transigés sous leur seul silver. Trois
-  explications possibles, non départagées : le silver du wiki est faux, le recyclage
-  coûte des frais de fonderie que personne ne documente, ou les artéfacts d'Avalon ne se
-  recyclent pas comme les autres. Ces lignes sont exclues du verdict en attendant.
+- **Le cristal et le féerique n'ont pas de barème relevé.** 100 artéfacts de cristal et
+  45 féeriques affichent « valeur à relever en jeu » plutôt qu'un chiffre inventé. Un
+  relevé T4 de chaque famille suffit : les 19 autres cases se déduisent.
+- **Le silver de la famille Avalon reste suspect** même après correction du barème :
+  10 des 11 impossibilités restantes s'y concentrent. Trois explications non départagées,
+  base fausse, frais de fonderie non documentés, ou mécanique de recyclage différente.
+  Le groupe entier est écarté des calculs dérivés en attendant.
+- **L'uniformité du tirage de fonte** sur les 9-10 pièces d'une branche est une
+  hypothèse, pas une donnée publiée.
 - **Les ratios de transmutation ne sont pas câblés.** Les sources publiques se
   contredisent : une page annonce 20 pour 1 en rareté, une autre dit que ce 20 pour 1 a
   été retiré en 2019. Rien n'est inventé ; l'écran de la fonderie donnera les vrais.

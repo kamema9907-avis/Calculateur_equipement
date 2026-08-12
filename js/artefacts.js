@@ -67,6 +67,7 @@ export const DOUTES = {
   marcheTropEtroit:    'volume quotidien insuffisant',
   pasDeDonnees:        'recyclage inconnu pour cet artéfact',
   pasDeMatiere:        'aucun matériau échangeable à la sortie',
+  silverInconnu:       'valeur de recyclage pas encore relevée en jeu',
 };
 
 // ---------------------------------------------------------------------------
@@ -139,19 +140,53 @@ export function achat(id, ctx) {
 }
 
 // ---------------------------------------------------------------------------
+//  Le prix BAS du marche : l'ordre de vente le moins cher, sans correction.
+//
+//  C'est la valeur a retenir pour la MATIERE recuperee, et le traitement est
+//  volontairement l'oppose de celui de l'artefact. Sur l'artefact on achete, un
+//  ordre anormalement bas GONFLERAIT le gain : on prend donc le prix prudent.
+//  Sur la matiere on compare a ce qu'elle aurait coute, un ordre anormalement
+//  bas REDUIT le gain du recyclage : le prix bas est donc le choix conservateur
+//  des deux cotes. Deux regles opposees, une seule direction.
+// ---------------------------------------------------------------------------
+export function prixBas(id, ctx) {
+  let bas = null, lieu = null;
+  for (const v of ctx.villesAchat) {
+    const e = ((ctx.prix[id] || {})[v] || {})[1];
+    if (!e || !(e.sell > 0)) continue;
+    if (ctx.maxAgeH != null && e.ageH > ctx.maxAgeH) continue;
+    if (bas == null || e.sell < bas) { bas = e.sell; lieu = v; }
+  }
+  return bas == null ? null : { prix: bas, lieu };
+}
+
+// ---------------------------------------------------------------------------
 //  Le rendu et le silver reellement retenus, surcharges comprises.
-//  Cles de surcharge : la racine du materiau (« RUNE ») et le couple
-//  « RUNE|6 », du plus general au plus precis.
+//
+//  Le silver suit le bareme releve en jeu :
+//     silver = base(materiau) x facteur(emplacement) x parTier^(tier - 4)
+//  Le calcul est refait ici plutot que lu tel quel dans les donnees, pour que
+//  modifier une base dans les Reglages se repercute sans regenerer le fichier.
 // ---------------------------------------------------------------------------
 export function racine(matiere) { return matiere ? matiere.replace(/^T\d_/, '') : null; }
 
+export function silverDe(art, bareme) {
+  if (!bareme || !art.emplacement) return null;
+  const base = bareme.bases[racine(art.matiere)];
+  const f = bareme.facteurs[art.emplacement];
+  if (base == null || f == null) return null;
+  return base * f * Math.pow(bareme.parTier || 2, art.tier - 4);
+}
+
 export function calibrage(art, ctx) {
   const r = racine(art.matiere);
-  const cles = [r, r + '|' + art.tier];
   let unites = ctx.unites != null ? ctx.unites : UNITES_DEFAUT;
-  let silver = art.silver || 0;
-  for (const c of cles) {
-    if (ctx.unitesPar && ctx.unitesPar[c] != null) unites = ctx.unitesPar[c];
+  if (ctx.unitesPar && ctx.unitesPar[r] != null) unites = ctx.unitesPar[r];
+
+  let silver = silverDe(art, ctx.bareme);
+  if (silver == null) silver = art.silver;          // valeur du fichier genere
+  // Surcharge fine, du plus general au plus precis.
+  for (const c of [r, r + '|' + art.tier, r + '|' + art.tier + '|' + art.emplacement]) {
     if (ctx.silverPar && ctx.silverPar[c] != null) silver = ctx.silverPar[c];
   }
   return { unites, silver };
@@ -184,47 +219,79 @@ export function rendementImplicite(art, ctx) {
 }
 
 // ---------------------------------------------------------------------------
+//  Un groupe (materiau, tier) est douteux des qu'UN de ses artefacts affiche un
+//  rendement implicite negatif. Le defaut porte sur la donnee du groupe — un
+//  silver ou un rendu faux —, pas sur l'artefact qui le revele.
+//
+//  Memoise par contexte : la fonction est appelee une fois par bassin, et
+//  chaque appel balaie les 725 artefacts.
+// ---------------------------------------------------------------------------
+export function groupeDouteux(matiere, catalogue, ctx) {
+  if (!matiere) return false;
+  const cle = matiere;
+  const cache = ctx._groupes || (ctx._groupes = {});
+  if (cache[cle] != null) return cache[cle];
+  let douteux = false;
+  for (const [id, art] of Object.entries(catalogue)) {
+    if (art.matiere !== matiere) continue;
+    const R = rendementImplicite({ ...art, id }, ctx);
+    if (R != null && R < 0) { douteux = true; break; }
+  }
+  return (cache[cle] = douteux);
+}
+
+// ---------------------------------------------------------------------------
 //  Recyclage d'un artefact. Deux lectures, et il faut les deux.
 // ---------------------------------------------------------------------------
 export function recyclage(art, ctx) {
   if (!art) return null;
-  if (art.matiere == null && art.silver == null) return { doute: DOUTES.pasDeDonnees };
-  if (!art.matiere) return { doute: DOUTES.pasDeMatiere };
+  if (!art.matiere) return { doute: art.matiereWiki ? DOUTES.pasDeMatiere : DOUTES.pasDeDonnees };
 
   const { unites, silver } = calibrage(art, ctx);
+  if (silver == null) return { doute: DOUTES.silverInconnu };
+
   const a = achat(art.id, ctx);
   if (!a) return null;
 
-  // Ou revendre la matiere. Le Black Market ne l'achete pas.
+  // Le prix bas du marche : ce que la matiere aurait coute. Aucune taxe — on ne
+  // vend rien, on evite un achat.
+  const marche = prixBas(art.matiere, ctx);
+
+  // ---- La formule de decision -------------------------------------------
+  //   bilan = prix de l'artefact − silver rendu − (rendu × prix de la matiere)
+  //   Negatif => bonne affaire. On expose l'oppose, pour que « plus grand »
+  //   veuille dire « meilleur » partout ailleurs dans l'outil.
+  const bilan = marche ? a.prix - silver - unites * marche.prix : null;
+  const gain = bilan == null ? null : -bilan;
+
+  // Second regard : si l'on revendait la matiere au lieu de s'en servir. Le
+  // Black Market ne l'achete pas. Cette valeur EST taxee, l'autre non : les
+  // confondre retirerait 4 a 6,5 % a une operation ou l'on n'a jamais vendu.
   const meilleur = debouchesDe(ctx.prix[art.matiere], (ctx.histo || {})[art.matiere], {
     villesVente: ctx.villesVente, qualite: 1, undercut: ctx.undercut,
     taxeOrdre: ctx.taxeOrdre, taxeInstant: ctx.taxeInstant,
     maxAgeH: ctx.maxAgeH, inclureBM: false,
   })[0] || null;
-
-  // Ce que la matiere couterait si on l'achetait simplement. Prix d'ACHAT, hors
-  // taxe, pour rester dans la meme convention que le cout de revient.
-  const marche = achat(art.matiere, ctx);
-
   const valeurRevente = meilleur ? unites * meilleur.net + silver : null;
-  const coutMatiere = (a.prix - silver) / unites;
 
+  const coutMatiere = (a.prix - silver) / unites;
   const R = rendementImplicite(art, ctx);
   const doute = R != null && R < 0 ? DOUTES.rendementImpossible : a.doute;
 
   return {
     id: art.id, matiere: art.matiere, unites, silver, achat: a, doute,
     rendementImplicite: R,
-    // Jambe « je revends la matiere »
+    // La formule de Vigile, sans taxe : c'est elle qui decide.
+    bilan, gain,
+    marge: gain != null && a.prix > 0 ? gain / a.prix : null,
+    coutMatiere,
+    prixMarcheMatiere: marche ? marche.prix : null,
+    lieuMatiere: marche ? marche.lieu : null,
+    economieMatiere: marche ? marche.prix - coutMatiere : null,
+    // Le second regard, taxe comprise.
     debouche: meilleur,
     valeurRevente,
     gainRevente: valeurRevente != null ? valeurRevente - a.prix : null,
-    margeRevente: valeurRevente != null && a.prix > 0 ? (valeurRevente - a.prix) / a.prix : null,
-    // Jambe « je m'en sers » : aucune taxe, on compare deux couts d'achat
-    coutMatiere,
-    prixMarcheMatiere: marche ? marche.prix : null,
-    economieMatiere: marche ? marche.prix - coutMatiere : null,
-    ratioMatiere: marche && coutMatiere > 0 ? marche.prix / coutMatiere : null,
   };
 }
 
@@ -268,9 +335,39 @@ export function revente(art, ctx) {
 //  d'ordres, trop creux (voir piege 2 en tete de fichier).
 // ---------------------------------------------------------------------------
 export function bassin(b, catalogue, ctx) {
-  const coutU = achat(b.matiere, ctx);
+  const coutU = prixBas(b.matiere, ctx);
   if (!coutU) return null;
   const cout = b.cout * coutU.prix;
+
+  // Deuxieme source de matiere : la recycler soi-meme. C'est la pratique reelle
+  // — on recycle des artefacts bon marche pour alimenter la fonderie, cinq
+  // artefacts recycles faisant une fonte. Une fonte jugee perdante au prix du
+  // marche peut devenir gagnante par cette voie.
+  //
+  // DEUX garde-fous, parce que la fonte MULTIPLIE PAR 50 l'erreur sur le cout
+  // d'une unite :
+  //
+  //  • Le groupe (materiau, tier) doit etre propre. Le cout par recyclage vaut
+  //    (prix − silver) / rendu : un silver SUREVALUE le fait paraitre bon
+  //    marche. Or c'est exactement le defaut soupconne sur la famille Avalon.
+  //    Sans cette regle, les bassins d'Avalon ressortaient en tete du
+  //    classement — non parce qu'ils sont bons, mais parce que leur donnee est
+  //    fausse. Le doute par artefact ne suffit pas : le defaut est une
+  //    propriete du GROUPE.
+  //  • La voie n'est proposee que si elle est effectivement moins chere que
+  //    l'achat. Sinon ce n'est pas une option, c'est du bruit.
+  let parRecyclage = null;
+  if (!groupeDouteux(b.matiere, catalogue, ctx)) {
+    for (const [id, art] of Object.entries(catalogue)) {
+      if (art.matiere !== b.matiere) continue;
+      const r = recyclage({ ...art, id }, ctx);
+      if (!r || r.doute || !(r.coutMatiere > 0)) continue;
+      if (r.coutMatiere >= coutU.prix) continue;
+      if (!parRecyclage || r.coutMatiere < parRecyclage.coutU) {
+        parRecyclage = { coutU: r.coutMatiere, via: id, cout: b.cout * r.coutMatiere };
+      }
+    }
+  }
 
   const tirages = [];
   for (const id of b.artefacts) {
@@ -288,7 +385,7 @@ export function bassin(b, catalogue, ctx) {
 
   const valeurs = tirages.map(t => t.valeur).filter(v => v != null).sort((x, y) => x - y);
   const n = tirages.length;
-  if (!valeurs.length) return { cout, n, nLiquides: 0, tirages, esperance: null };
+  if (!valeurs.length) return { cout, parRecyclage, n, nLiquides: 0, tirages, esperance: null };
 
   // Les tirages sans prix comptent pour zero : le jeu nous les donnera quand
   // meme. Les ecarter gonflerait l'esperance de tout ce qu'on ne sait pas
@@ -301,12 +398,14 @@ export function bassin(b, catalogue, ctx) {
   const ecartType = Math.sqrt(valeurs.reduce((a, x) => a + (x - moyenne) ** 2, 0) / m);
 
   return {
-    cout, n, nLiquides: m, tirages,
+    cout, parRecyclage, n, nLiquides: m, tirages,
     esperance, mediane,
     meilleur: valeurs[m - 1],
     pire: valeurs[0],
     gain: esperance - cout,
     gainMedian: mediane - cout,
+    // Le meme tirage, mais avec des runes recyclees plutot qu'achetees.
+    gainMedianRecyclage: parRecyclage ? mediane - parRecyclage.cout : null,
     marge: cout > 0 ? (esperance - cout) / cout : null,
     // Combien de fontes avant que la moyenne observee veuille dire quelque
     // chose : (CV / 0,10)². En dessous de quelques dizaines, le pari est lisible.
@@ -324,8 +423,10 @@ export function bassin(b, catalogue, ctx) {
 // ---------------------------------------------------------------------------
 export function verdict({ rec, rev, fabrication }) {
   const options = [];
-  if (rec && rec.gainRevente != null && !rec.doute) {
-    options.push({ voie: 'recycler', gain: rec.gainRevente, marge: rec.margeRevente });
+  // Le recyclage se juge sur la formule sans taxe : la matiere est gardee pour
+  // refondre, elle n'est jamais vendue.
+  if (rec && rec.gain != null && !rec.doute) {
+    options.push({ voie: 'recycler', gain: rec.gain, marge: rec.marge });
   }
   if (rev) options.push({ voie: 'revendre', gain: rev.gain, marge: rev.marge });
   if (fabrication && fabrication.profit != null) {

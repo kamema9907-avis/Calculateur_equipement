@@ -519,9 +519,57 @@ fs.writeFileSync(OUT_FICHES, JSON.stringify({
 //  n'ont aucun item echangeable et un silver de 0 : leur recyclage n'est pas
 //  chiffrable, ce qui doit s'afficher comme tel et jamais comme un zero.
 // ---------------------------------------------------------------------------
-const UNITES_RECYCLAGE = 10;   // valeur relevee en jeu par Vigile ; le wiki dit 12-13
+const UNITES_RECYCLAGE = 10;   // releve en jeu par Vigile
 const FONTE_BRANCHE = 50;
 const FONTE_TOUTES = 36;
+
+// ---------------------------------------------------------------------------
+//  Le bareme de silver, releve en jeu apres la mise a jour de 2026.
+//
+//  Le wiki d'aout 2026 publie UN SEUL montant par (materiau, tier), et c'est
+//  celui des armes a DEUX MAINS : rapport quasi constant entre l'ancienne
+//  valeur et le nouveau x4 — 84/96 = 0,875 · 248/288 = 0,861 · 580/672 = 0,863
+//  · 1244/1440 = 0,864. L'appliquer aux casques, bottes et secondaires les
+//  surevaluait donc d'un facteur QUATRE, sur 195 artefacts du catalogue.
+//
+//     silver = base(materiau) x facteur(emplacement) x 2^(tier - 4)
+//
+//  Le facteur suit la valeur d'objet du jeu. Le x3 de l'arme a une main a ete
+//  confronte au marche : un artefact ne pouvant pas se vendre durablement sous
+//  le silver de son recyclage, on compte les impossibilites sur 420 artefacts
+//  cotes hors Avalon — x2 en donne 1, x3 en donne 1, x4 en donne 4. Le x3 passe,
+//  le x4 est refute. Mieux : la plus basse arme a une main rune se transige a
+//  3,3 fois sa base, donc au-dessus de x3 et sous x4.
+//
+//  Controle de coherence du modele entier : la hallebarde de Morgane T4 (arme a
+//  deux mains, 939 ventes par jour) se transige a 83 pour un plancher de 84.
+// ---------------------------------------------------------------------------
+const BAREME = {
+  // Montant a T4 pour un emplacement de facteur 1.
+  bases: { RUNE: 21, SOUL: 62, RELIC: 145, SHARD_AVALONIAN: 311 },
+  // Emplacements sans valeur : releve non encore fait en jeu (cf. LISEZ-MOI).
+  facteurs: { HEAD: 1, SHOES: 1, OFF: 1, ARMOR: 2, MAIN: 3, '2H': 4 },
+  parTier: 2,
+};
+
+// L'emplacement se lit dans l'identifiant : c'est la seule source, et elle est
+// exacte — les 725 artefacts se rangent sans reste dans ces six familles.
+function emplacementDe(id) {
+  if (id.includes('_2H_')) return '2H';
+  if (id.includes('_MAIN_')) return 'MAIN';
+  if (id.includes('_ARMOR_')) return 'ARMOR';
+  if (id.includes('_OFF_')) return 'OFF';
+  if (id.includes('_HEAD_')) return 'HEAD';
+  if (id.includes('_SHOES_')) return 'SHOES';
+  return null;
+}
+
+function silverDe(matiere, id, tier) {
+  const base = BAREME.bases[(matiere || '').replace(/^T\d_/, '')];
+  const f = BAREME.facteurs[emplacementDe(id)];
+  if (base == null || f == null) return null;   // famille non relevee : on ne devine pas
+  return base * f * Math.pow(BAREME.parTier, tier - 4);
+}
 
 const wikiMateriaux = loadWiki('materials.json');
 
@@ -619,6 +667,10 @@ for (const idArt of Object.keys(objetParArtefact)) {
   else if (rec.matiere) nbRecyclables++;
   else nbNonChiffrables++;
 
+  const matiere = rec ? rec.matiere : null;
+  const emplacement = emplacementDe(idArt);
+  const silver = silverDe(matiere, idArt, tier);
+
   artefactsDetail[idArt] = {
     objet: objets[0],
     // Un artefact qui servirait a deux objets casserait la lecture « 1:1 » du
@@ -626,11 +678,15 @@ for (const idArt of Object.keys(objetParArtefact)) {
     objetsMultiples: objets.length > 1 ? objets : undefined,
     tier,
     lignee: suffixe,
+    emplacement,
     famille: rec ? rec.famille : null,
-    matiere: rec ? rec.matiere : null,
+    matiere,
     matiereWiki: rec ? rec.matiereWiki : null,
-    silver: rec ? rec.silver : null,
-    qteWiki: rec ? rec.qteWiki : null,
+    // Le bareme releve en jeu fait foi. La valeur du wiki est conservee a cote
+    // pour que l'ecart reste verifiable, pas pour servir de repli : un repli
+    // silencieux sur une donnee fausse est pire que pas de donnee du tout.
+    silver,
+    silverWiki: rec ? rec.silver : null,
     bassin: bassinParArtefact[idArt] || null,
   };
 }
@@ -665,9 +721,10 @@ if (reapparus.length) {
 const OUT_ARTEFACTS = path.resolve(__dirname, '..', 'data', 'artefacts.json');
 fs.writeFileSync(OUT_ARTEFACTS, JSON.stringify({
   generatedAt: new Date().toISOString(),
-  source: 'wiki Albion (materials.json) + dump fonderie (artefact_foundry.json)',
+  source: 'barème relevé en jeu (2026) + dump fonderie (artefact_foundry.json)',
   unitesRecyclage: UNITES_RECYCLAGE,
   fonte: { branche: FONTE_BRANCHE, toutes: FONTE_TOUTES },
+  bareme: BAREME,
   materiaux: [...MATIERES_NEGOCIABLES],
   artefacts: artefactsDetail,
   bassins,

@@ -1214,7 +1214,7 @@
               <th class="g">Objet fabriqué</th>
               <th @click="trierArt('prixAchat')">Achat<span class="fl">{{ flecheArt('prixAchat') }}</span></th>
               <th class="g">Rend</th>
-              <th @click="trierArt('valeurRecyclage')">Recyclage vaut<span class="fl">{{ flecheArt('valeurRecyclage') }}</span></th>
+              <th @click="trierArt('bilan')">Bilan<span class="fl">{{ flecheArt('bilan') }}</span></th>
               <th @click="trierArt('coutMatiere')">Matière revient à<span class="fl">{{ flecheArt('coutMatiere') }}</span></th>
               <th @click="trierArt('gain')">Gain / pièce<span class="fl">{{ flecheArt('gain') }}</span></th>
               <th @click="trierArt('gainJour')">Gain / jour<span class="fl">{{ flecheArt('gainJour') }}</span></th>
@@ -1248,14 +1248,19 @@
                 <div class="id">{{ l.manuel ? 'saisi' : l.lieuAchat }}</div>
               </td>
               <td class="g" data-lab="Rend">
-                <template v-if="l.matiere">
+                <template v-if="l.matiere && l.silver!=null">
                   {{ artf.unites }} × {{ l.nomMatiere }}<br>
-                  <span class="id">+ {{ fmt(l.silver) }} silver</span>
+                  <span class="id">+ {{ fmt(l.silver) }} silver ({{ l.emplacement==='2H' ? '2 mains' :
+                    l.emplacement==='MAIN' ? '1 main' : l.emplacement==='ARMOR' ? 'poitrine' : 'petite pièce' }})</span>
                 </template>
+                <span v-else-if="l.matiere" class="na">valeur à relever en jeu</span>
                 <span v-else-if="l.matiereWiki" class="na">non échangeable</span>
                 <span v-else class="na">donnée absente</span>
               </td>
-              <td data-lab="Recyclage vaut">{{ fmtM(l.valeurRecyclage) }}</td>
+              <td data-lab="Bilan" :class="profitClasse(l.bilan==null?null:-l.bilan)">
+                <div class="tnum">{{ signe(l.bilan) }}</div>
+                <div class="id" v-if="l.bilan!=null">négatif = bonne affaire</div>
+              </td>
               <td data-lab="Matière revient à">
                 <div class="tnum" :class="profitClasse(l.economieMatiere)">{{ fmtM(l.coutMatiere) }}</div>
                 <div class="id" v-if="l.prixMarcheMatiere">marché {{ fmtM(l.prixMarcheMatiere) }}</div>
@@ -1297,7 +1302,8 @@
           <thead>
             <tr>
               <th class="g">Bassin</th>
-              <th>Coût d'une fonte</th>
+              <th>Runes achetées</th>
+              <th>Runes recyclées</th>
               <th>Médiane</th>
               <th>Gain médian</th>
               <th>Espérance</th>
@@ -1312,9 +1318,19 @@
                 <div class="nom">{{ b.nomMatiere }} — {{ b.branche==='toutes' ? 'les 3 branches' : b.branche }}</div>
                 <div class="id"><span class="pastille t">T{{ b.tier }}</span> {{ b.unitesFonte }} unités → 1 pièce parmi {{ b.n }}</div>
               </td>
-              <td data-lab="Coût d'une fonte">{{ fmtM(b.cout) }}</td>
+              <td data-lab="Runes achetées">{{ fmtM(b.cout) }}</td>
+              <td data-lab="Runes recyclées">
+                <template v-if="b.parRecyclage">
+                  <div class="tnum pos">{{ fmtM(b.parRecyclage.cout) }}</div>
+                  <div class="id">via {{ nom(b.parRecyclage.via) }}</div>
+                </template>
+                <span v-else class="na">—</span>
+              </td>
               <td data-lab="Médiane">{{ fmtM(b.mediane) }}</td>
-              <td data-lab="Gain médian" :class="profitClasse(b.gainMedian)">{{ signe(b.gainMedian) }}</td>
+              <td data-lab="Gain médian" :class="profitClasse(b.gainMedianRecyclage!=null ? b.gainMedianRecyclage : b.gainMedian)">
+                <div class="tnum">{{ signe(b.gainMedian) }}</div>
+                <div class="id" v-if="b.gainMedianRecyclage!=null">{{ signe(b.gainMedianRecyclage) }} en recyclant</div>
+              </td>
               <td data-lab="Espérance">{{ fmtM(b.esperance) }}</td>
               <td data-lab="Pire">{{ fmtM(b.pire) }}</td>
               <td data-lab="Meilleur">{{ fmtM(b.meilleur) }}</td>
@@ -1425,13 +1441,70 @@
           </tbody>
         </table>
       </div>
+      <div class="carte" style="margin-top:12px" v-if="artf.bareme">
+        <h3>Le barème de recyclage — relevé en jeu, modifiable</h3>
+        <div class="carte-corps">
+          <p>Le silver rendu vaut <b>base × facteur d'emplacement × 2 par tier</b>. Les valeurs
+          ci-dessous sont celles que tu as relevées : elles sont déjà câblées, tu n'as rien à saisir.
+          Corrige-les seulement si le jeu change son barème.</p>
+
+          <div class="grille-filtres" style="margin-bottom:12px">
+            <div class="champ" v-for="(v, rac) in artf.bareme.bases" :key="rac">
+              <span class="lab">Base T4 · {{ (RACINES_MAT.find(m=>m.cle===rac)||{}).label || rac }}</span>
+              <input type="number" min="0" step="1" v-model.number="artf.bareme.bases[rac]">
+            </div>
+            <div class="champ" v-for="(v, e) in artf.bareme.facteurs" :key="'f'+e"
+                 v-show="e==='HEAD' || e==='ARMOR' || e==='MAIN' || e==='2H'">
+              <span class="lab">Facteur · {{ e==='HEAD' ? 'tête, pieds, secondaire' :
+                e==='ARMOR' ? 'poitrine' : e==='MAIN' ? 'arme à 1 main' : 'arme à 2 mains' }}</span>
+              <input type="number" min="0" step="0.5" v-model.number="artf.bareme.facteurs[e]"
+                     @input="if(e==='HEAD'){ artf.bareme.facteurs.SHOES=artf.bareme.facteurs.HEAD; artf.bareme.facteurs.OFF=artf.bareme.facteurs.HEAD; }">
+            </div>
+            <div class="champ">
+              <span class="lab">Multiplicateur par tier</span>
+              <input type="number" min="1" step="0.5" v-model.number="artf.bareme.parTier">
+            </div>
+            <div class="champ">
+              <span class="lab">Unités rendues</span>
+              <input type="number" min="1" step="1" v-model.number="artf.unites">
+            </div>
+          </div>
+          <div class="actions">
+            <button class="plat" @click="reinitialiserBareme()">Revenir aux valeurs livrées</button>
+          </div>
+
+          <div class="tablewrap" style="margin-top:12px">
+            <table class="tb">
+              <thead>
+                <tr><th class="g">Matériau et emplacement</th>
+                  <th v-for="t in [4,5,6,7,8]" :key="t">T{{ t }}</th></tr>
+              </thead>
+              <tbody>
+                <template v-for="g in tableSilver" :key="g.racine">
+                  <tr v-for="(li, i) in g.lignes" :key="g.racine+li.cle">
+                    <td class="g">
+                      <span v-if="i===0" class="pastille">{{ (RACINES_MAT.find(m=>m.cle===g.racine)||{}).label || g.racine }}</span>
+                      {{ li.label }} <span class="id">×{{ li.facteur }}</span>
+                    </td>
+                    <td v-for="(v, k) in li.parTier" :key="k" :data-lab="'T'+(k+4)">{{ fmt(v) }}</td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p class="statut">Les 100 artéfacts de cristal et les 45 féeriques n'ont pas encore de barème :
+          leurs lignes affichent « valeur à relever en jeu » plutôt qu'un chiffre inventé.</p>
+        </div>
+      </div>
+
       <div class="carte" style="margin-top:12px">
         <h3>Ce qu'il reste à trancher en jeu</h3>
         <div class="carte-corps">
           <p><b>Recycle un artéfact et note ce que tu obtiens.</b> Trente secondes en jeu valent mieux que
           toute cette statistique. Deux questions ouvertes :</p>
-          <p>1. <b>Combien d'unités ?</b> Tu dis 10, le wiki dit 12-13. Le marché exige au moins 10
-          et n'exclut pas 12-13.</p>
+          <p>1. <b>Le cristal et le féerique.</b> 145 artéfacts n'ont pas encore de barème relevé.
+          Leur ligne reste vide plutôt que devinée. Un relevé T4 de chaque famille suffit : j'en
+          déduis les 19 autres cases par le barème 1:2:3:4 et le doublement par tier.</p>
           <p>2. <b>Le silver de la famille Avalon.</b> Les éclats d'Avalon T6 et T7 sortent avec un premier
           quartile négatif, et 19 artéfacts s'y transigent sous leur seul silver — ce qui serait de l'argent
           gratuit laissé sur la table pendant une semaine. Trois explications possibles : le silver du wiki
