@@ -42,13 +42,13 @@ accès en un tap.
 Les appels à l'API de prix fonctionnent depuis Pages (CORS autorisé, tout en HTTPS).
 
 Pages sert la branche `main` à la racine. Le développement se fait sur la branche de
-version en cours (`version-5`) ; pour publier une amélioration :
+version en cours (`version-7`) ; pour publier une amélioration :
 
 ```
 git checkout main
-git merge version-5
+git merge version-7
 git push
-git checkout version-5
+git checkout version-7
 ```
 
 Le site se met à jour tout seul 30 à 60 secondes après le push.
@@ -56,17 +56,22 @@ Le site se met à jour tout seul 30 à 60 secondes après le push.
 ### Clore une version et ouvrir la suivante
 
 ```
-git tag -a version-5 -m "Version 5 — description"
-git branch version-6 refs/heads/version-5
-git checkout version-6
-git push origin refs/tags/version-5:refs/tags/version-5
-git push -u origin refs/heads/version-6:refs/heads/version-6
+git tag -a version-7 -m "Version 7 — description" refs/heads/main
+git branch version-8 refs/heads/main
+git checkout version-8
+git push origin refs/tags/version-7:refs/tags/version-7
+git push -u origin refs/heads/version-8:refs/heads/version-8
 ```
 
+Le tag se pose **sur le commit de fusion dans `main`**, pas sur la pointe de la branche
+de version : c'est cet état-là qui a été publié, et c'est de lui que part la version
+suivante.
+
 ⚠️ Les refspecs complets (`refs/heads/…`, `refs/tags/…`) sont **nécessaires** : chaque
-version porte une branche et un tag de même nom, et `git branch version-6 version-5`
-échoue alors avec *ambiguous object name*, tout comme `git push origin version-5`
-échoue avec *src refspec matches more than one*.
+version porte une branche et un tag de même nom, et `git branch version-8 version-7`
+échoue alors avec *ambiguous object name*, tout comme `git push origin version-7`
+échoue avec *src refspec matches more than one*. Même piège sur `git merge version-7`
+une fois le tag posé : merger **avant** de taguer, ou écrire `refs/heads/version-7`.
 
 ---
 
