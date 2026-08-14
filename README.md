@@ -348,6 +348,28 @@ L'opération a deux jambes, et elles ne sont pas du même ordre : `T6_RELIC` s'�
 des deux jambes**, et dit laquelle mord. Une marge de 34 % sur cinq pièces par jour se
 lit ainsi comme 32 000 silver quotidiens, pas comme un pourcentage flatteur.
 
+### Choisir sa ville d'achat
+
+Par défaut, l'outil retient **le meilleur ordre des sept villes** — ce qui suppose de
+traverser la carte pour aller le chercher. Un menu déroulant restreint tout ce qui
+s'achète à **une seule ville** : l'artéfact, la matière à laquelle on le compare, les
+ingrédients de la colonne « fabriquer », et les volumes qui bornent le gain par jour.
+
+Les artéfacts sans ordre sur place **disparaissent du tableau** au lieu d'y figurer pour
+être écartés à la lecture. Un ordre plus vieux que l'âge maximal accepté compte comme
+absent : sinon la ligne resterait avec un prix tiré du seul historique, sans ordre
+derrière. Un prix saisi à la main survit toujours au filtre — c'est ce que tu as payé,
+pas une cote de marché.
+
+**La revente reste libre.** Le filtre ne porte que sur l'achat ; c'est la case « acheter
+et revendre dans la même ville » qui interdit le trajet, et les deux réglages se
+combinent.
+
+⚠️ La vue **Étalonnage** suit le filtre, mais le signale. Elle juge le barème sur ce qui
+se transige, et une ville seule n'en porte qu'une fraction : les quartiles n'y sont plus
+qu'indicatifs et des groupes entiers peuvent disparaître. Pour trancher une donnée
+douteuse, repasser sur « Toutes les villes ».
+
 ### Verdict à cinq états
 
 **Recycler**, **fabriquer**, **revendre**, **rien**, et **données douteuses**. Le

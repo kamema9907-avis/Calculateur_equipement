@@ -1128,7 +1128,10 @@ const app = createApp({
       lignees: C.LIGNEES.map(l => l.cle).filter(c => c !== 'commun'),
       matieres: ['RUNE', 'SOUL', 'RELIC', 'SHARD_AVALONIAN', 'SHARD_CRYSTAL'],
       recherche: '',
-      villesAchat: [...V.VILLES],
+      // Sentinelle 'toutes' plutot qu'un tableau : le <select> a besoin d'une
+      // valeur scalaire, et une seule source de verite evite qu'une liste
+      // persistee contredise le menu. Meme forme que `r.villeFabrication`.
+      villeAchat: 'toutes',
       villesVente: [...V.VILLES],
       modeAchat: 'prudent',
       // null a l'ouverture : c'est le fichier genere qui fournit la valeur, et
@@ -1158,6 +1161,7 @@ const app = createApp({
       if (sauv) {
         Object.assign(artf, sauv.artf || {});
         Object.assign(manuelArt, sauv.manuel || {});
+        delete artf.villesAchat;   // residu des sauvegardes v1, plus lu par personne
       }
     } catch { /* reglages corrompus : on garde les defauts */ }
     watch([artf, manuelArt], () => {
@@ -1195,9 +1199,15 @@ const app = createApp({
       if (baremeLivre) artf.bareme = JSON.parse(JSON.stringify(baremeLivre));
     }
 
+    // Une ville choisie restreint TOUT ce qui s'achete : l'artefact, la matiere
+    // recuperee, les ingredients de la colonne « fabriquer », et les volumes qui
+    // bornent le realisable. La vente reste libre — le garde-fou du trajet est
+    // la case `memeVille`, pas ce menu.
+    const villesAchatArt = () => artf.villeAchat === 'toutes' ? V.VILLES : [artf.villeAchat];
+
     const ctxArt = () => ({
       prix: prixArt, histo: histoArt,
-      villesAchat: artf.villesAchat, villesVente: artf.villesVente,
+      villesAchat: villesAchatArt(), villesVente: artf.villesVente,
       maxAgeH: f.maxAgeH || null, undercut: r.undercut / 100,
       taxeOrdre: eco.value.ordre, taxeInstant: eco.value.instant,
       manuel: manuelArt, modeAchat: artf.modeAchat,
@@ -1284,7 +1294,7 @@ const app = createApp({
     function ctxArtMoteur() {
       return M.creerContexte({
         byId: donnees.byId, prices: prixArt, manual: manuelArt,
-        villesAchat: artf.villesAchat,
+        villesAchat: villesAchatArt(),
         villeRaffinage: r.villeRaffinage, villeFabrication: r.villeFabrication,
         tableVilles: table,
         focusRaffinage: r.focusRaffinage, focusFabrication: r.focusFabrication,
@@ -1313,6 +1323,18 @@ const app = createApp({
         }
 
         const art = { ...base, id };
+
+        // Ville unique : un artefact sans ordre de vente sur place n'est pas une
+        // source, quelle que soit sa cote ailleurs. On coupe AVANT le calcul
+        // lourd — la colonne « fabriquer » tarife 5 enchantements et toute leur
+        // chaine. `Art.achat` plutot qu'une lecture brute de `prixArt` : c'est
+        // lui qui centralise le rejet des ordres perimes, et il rend
+        // `lieu: 'manuel'` pour un prix saisi, qui reste donc affiche.
+        if (artf.villeAchat !== 'toutes') {
+          const a0 = Art.achat(id, ctx);
+          if (!a0 || a0.lieu == null) continue;
+        }
+
         const rec = Art.recyclage(art, ctx);
         const rev = Art.revente(art, ctx);
         if (artf.memeVille && rev && rev.trajet) rev.gain = null;
@@ -1395,7 +1417,8 @@ const app = createApp({
     });
 
     const lignesArtAffichees = computed(() => lignesArt.value.slice(0, limiteArt.value));
-    watch([() => triArt.cle, () => artf.vue, () => artf.recherche], () => { limiteArt.value = 100; });
+    watch([() => triArt.cle, () => artf.vue, () => artf.recherche, () => artf.villeAchat],
+      () => { limiteArt.value = 100; });
 
     function trierArt(k) {
       if (triArt.cle === k) triArt.sens = triArt.sens === 'asc' ? 'desc' : 'asc';
