@@ -1112,7 +1112,8 @@
         </button>
         <button class="plat" v-if="artChargees" @click="chargerArtefacts(true)" :disabled="chargement">Forcer</button>
         <span class="statut" v-if="!artChargees">725 artéfacts et 25 matériaux, prix et transactions réelles. Environ 15 s.</span>
-        <span class="statut" v-else>{{ fmt(resumeArt.total) }} artéfacts affichés ·
+        <span class="statut" v-else>{{ fmt(resumeArt.total) }} artéfacts affichés<template
+            v-if="artf.villeAchat!=='toutes'"> à <b>{{ artf.villeAchat }}</b></template> ·
           gain réalisable cumulé <b class="pos">{{ fmtM(resumeArt.gainJour) }}</b> silver par jour</span>
       </div>
       <div v-if="chargement" class="barre-progres"><i :style="{width: progres+'%'}"></i></div>
@@ -1151,6 +1152,18 @@
         <div class="champ">
           <span class="lab">Recherche</span>
           <input type="text" v-model="artf.recherche" placeholder="nom ou identifiant">
+        </div>
+        <div class="champ">
+          <span class="lab">Ville d'achat de l'artéfact</span>
+          <select v-model="artf.villeAchat">
+            <option value="toutes">Toutes les villes</option>
+            <option v-for="v in VILLES" :key="v" :value="v">{{ v }}</option>
+          </select>
+          <span class="statut" v-if="artf.villeAchat==='toutes'">
+            Le meilleur ordre où qu'il soit, quitte à traverser la carte.</span>
+          <span class="statut" v-else>
+            Tout ce qui s'achète est pris à {{ artf.villeAchat }} : l'artéfact, la matière
+            et les ingrédients. La revente reste libre.</span>
         </div>
         <div class="champ">
           <span class="lab">Prix d'achat retenu</span>
@@ -1410,6 +1423,12 @@
         sans problème — l'artéfact vaut alors plus cher comme ingrédient. Mais il ne peut pas être
         <b>négatif</b> : cela voudrait dire qu'un artéfact se vend moins cher que le seul silver qu'il rapporte.
         Un groupe à médiane négative ou à premier quartile négatif porte une donnée fausse.
+      </div>
+      <div class="bandeau avert" v-if="artf.villeAchat!=='toutes'">
+        L'étalonnage juge le barème sur ce qui se transige. Restreint à <b>{{ artf.villeAchat }}</b>,
+        il travaille sur une fraction du volume : les quartiles ne sont plus qu'indicatifs et des
+        groupes entiers peuvent disparaître. Repasse sur « Toutes les villes » pour trancher une
+        donnée douteuse.
       </div>
       <div class="tablewrap">
         <table class="tb">
