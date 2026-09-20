@@ -3,14 +3,24 @@
  * -----------------------------------------------------------------------------
  * Genere le fichier de donnees consomme par index.html.
  *
- * DEUX sources, complementaires :
+ * DEUX sources, aux roles desormais bien separes :
  *
- *   1. ../Albion_librairie_des_recettes_du_jeu/data  (dumps Jaccak, juin 2026)
- *      Les recettes, avec leurs identifiants machine et leur nutrition.
+ *   1. ../Albion_librairie_des_recettes_du_jeu/base  (dumps du jeu, a jour)
+ *      Les recettes, les categories de boutique, les noms, la nutrition de
+ *      fabrication, les exclusions du retour de ressources, la fonderie.
  *
  *   2. ../Albion_Analyse_site_web/data               (wiki officiel, aout 2026)
- *      La categorie de bonus de ville de chaque objet, et les objets que les
- *      dumps de juin n'avaient pas encore (ligne Royale, artefacts Crystal).
+ *      Uniquement ce que le jeu ne publie pas : l'Item Power par qualite,
+ *      les statistiques de combat, le recyclage des artefacts et la ville
+ *      bonifiante de chaque categorie.
+ *
+ * MIGRATION DU 2026-09-20
+ *   Ce script lisait la librairie sous sa forme Jaccak, source morte depuis
+ *   novembre 2024, et completait ses manques avec le wiki. La librairie lit
+ *   maintenant les fichiers du jeu, republies tous les 3 a 5 jours : elle est
+ *   devenue la source la plus fraiche. Ont donc disparu l'import de recettes
+ *   depuis le wiki, la deduction de station par sous-categorie et la
+ *   reparation des noms francais abimes.
  *
  * Sortie : data/equipment-data.json
  *
@@ -30,7 +40,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const LIB = path.resolve(__dirname, '..', '..', 'Albion_librairie_des_recettes_du_jeu', 'data');
+const LIB = path.resolve(__dirname, '..', '..', 'Albion_librairie_des_recettes_du_jeu', 'base');
 const WIKI = path.resolve(__dirname, '..', '..', 'Albion_Analyse_site_web', 'data');
 const OUT = path.resolve(__dirname, '..', 'data', 'equipment-data.json');
 
@@ -40,19 +50,97 @@ const loadWiki = rel => JSON.parse(fs.readFileSync(path.join(WIKI, rel), 'utf8')
 console.log('Recettes  :', LIB);
 console.log('Wiki      :', WIKI);
 
-const allRecipes = load('all-recipes.json').recipes;
-const names = load('names.json').items;
+const lignes = load('recettes.json').recettes;
+const items = load('items.json').items;
+const noms = load('noms.json').items;
 const meta = load('meta.json');
-const foundry = load('recipes/artefact_foundry.json');
+
+// Index des objets de la librairie : il porte les categories de boutique du
+// jeu, que l'on allait chercher dans le wiki jusqu'ici.
+const itemParId = {};
+for (const o of items) itemParId[o.id] = o;
+
+const tierDe = id => { const m = /^T(\d+)_/.exec(id); return m ? +m[1] : 0; };
+
+// ---------------------------------------------------------------------------
+//  Adaptation au format historique de ce script.
+//  base/ groupe sous un meme identifiant les variantes d'une recette (le
+//  raffinage en a deux, avec ou sans jeton de faction) ; la premiere est
+//  exactement celle que fournissait l'ancienne source.
+// ---------------------------------------------------------------------------
+// La librairie distingue les cinq batiments de raffinage (fonderie, tannerie,
+// tisserand, scierie, tailleur de pierre) la ou l'ancienne source les confondait
+// sous « refinery ». Le moteur, lui, ne pose qu'une question : est-ce du
+// raffinage ? (moteur.js teste station === 'refinery' pour choisir le taux de
+// retour et l'intitule « raffiner »). On recolle donc les cinq ici. Le detail
+// reste disponible dans base/ pour qui voudra un bonus de ville par batiment.
+const RAFFINAGE = new Set(['smelter', 'tannery', 'weaver', 'lumbermill', 'stonemason']);
+
+const allRecipes = lignes.map(l => {
+  const r = l.recettes[0];
+  return {
+    id: l.id,
+    station: RAFFINAGE.has(l.station) ? 'refinery' : l.station,
+    tier: l.tier,
+    enchantment: l.enchantement,
+    quantity: r.quantiteProduite,
+    // nutritionCraft est la nutrition CONSOMMEE par la fabrication, calculee
+    // par la librairie comme valeur des ingredients x 0,001125 — la relation
+    // que ce script avait deja verifiee sur 1 191 objets du wiki.
+    nutrition: r.nutritionCraft || 0,
+    excludeFromRRR: r.ingredients.filter(i => i.exclusDuRetour).map(i => i.id),
+    ingredients: r.ingredients.map(i => ({
+      id: i.id, tier: tierDe(i.id), enchantment: i.enchantement || 0, quantity: i.quantite,
+    })),
+  };
+});
+
+// ---------------------------------------------------------------------------
+//  Fonderie d'artefacts, reconstituee depuis la librairie
+//
+//  L'ancienne source livrait un artefact_foundry.json tout fait. Les dumps du
+//  jeu donnent mieux : la recette exacte de chaque artefact (50 unites de
+//  T4_SOUL, par exemple). Il manque seulement la BRANCHE, car la fonderie tire
+//  au hasard dans un bassin propre a Guerrier, Mage ou Chasseur.
+//
+//  Cette branche se deduit sans rien supposer : c'est la station de l'objet qui
+//  consomme l'artefact. Verifie contre les 560 artefacts de l'ancien fichier,
+//  560 branches retrouvees a l'identique. La derivation en couvre 760, soit
+//  200 de plus, parce que le jeu a continue d'en ajouter depuis 2024.
+// ---------------------------------------------------------------------------
+const BRANCHE_PAR_STATION = {
+  warriors_forge: 'warrior', mages_tower: 'mage', hunters_lodge: 'hunter',
+};
+
+const brancheParArtefact = {};
+for (const r of allRecipes) {
+  const branche = BRANCHE_PAR_STATION[r.station];
+  if (!branche) continue;
+  for (const i of r.ingredients) {
+    if (i.id.includes('ARTEFACT')) brancheParArtefact[i.id] = branche;
+  }
+}
+
+const foundry = { warrior: [], mage: [], hunter: [] };
+{
+  const groupes = {};
+  for (const o of items) {
+    if (o.categorieBoutique !== 'artefacts' || !o.recettes.length) continue;
+    const ing = o.recettes[0].ingredients[0];
+    const branche = brancheParArtefact[o.id];
+    if (!ing || !branche) continue;              // artefact d'aucune recette du jeu
+    const cle = branche + '|' + o.tier + '|' + ing.id + '|' + ing.quantite;
+    const g = groupes[cle] || (groupes[cle] = {
+      runeId: ing.id, runeQty: ing.quantite, tier: o.tier, artefacts: [],
+    });
+    g.artefacts.push(o.id);
+    if (!foundry[branche].includes(g)) foundry[branche].push(g);
+  }
+}
 
 const wikiItems = loadWiki('items.json');
 const wikiNoms = loadWiki('noms_items.json');
-const wikiRecettes = loadWiki('recipes.json');
 const wikiVilles = loadWiki('city_bonuses.json');
-
-// Index du wiki par identifiant machine.
-const wikiParId = {};
-for (const it of wikiItems) if (it.unique_name) wikiParId[it.unique_name] = it;
 
 // ---------------------------------------------------------------------------
 //  Categorie de bonus de ville
@@ -85,16 +173,24 @@ const PAR_CATEGORIE = {
 
 function categorieBonus(id) {
   const base = id.split('@')[0];
-  const it = wikiParId[base];
+
+  // Les outils passent AVANT la categorie de boutique. Le jeu les range sous
+  // shopcategory="gathering", ce qui les ferait basculer vers « Gathering
+  // Gear » alors que leur bonus de ville est celui des « Tools ». Les deux
+  // pointent Caerleon, donc le calcul serait juste, mais l'etiquette servirait
+  // a regrouper des pioches avec des sacs de recolte.
+  if (base.includes('_TOOL_')) return 'Tools';
+
+  // Les categories viennent desormais de la librairie et non du wiki : memes
+  // valeurs, mais elles couvrent aussi les objets que le wiki n'a jamais vus.
+  const it = itemParId[base];
   if (it) {
-    const parCat = PAR_CATEGORIE[it.shop_category];
+    const parCat = PAR_CATEGORIE[it.categorieBoutique];
     if (parCat) return parCat;
-    const parSous = SOUS_CATEGORIE[it.shop_subcategory];
+    const parSous = SOUS_CATEGORIE[it.sousCategorieBoutique];
     if (parSous) return parSous;
   }
-  // Replis, pour ce que l'extraction du wiki ne couvre pas. Chacun est verifie :
-  // les outils de recolte et les batons de moine noir n'ont pas de fiche objet.
-  if (base.includes('_TOOL_')) return 'Tools';
+  // Replis pour ce qui n'entre dans aucune categorie du jeu.
   if (base.includes('GATHERER')) return 'Gathering Gear';
   if (base.includes('COMBATSTAFF')) return 'Quarterstaff';
   if (/^T\d_BAG/.test(base)) return 'Bags';
@@ -118,7 +214,10 @@ const SLOTS = new Set(['2H', 'MAIN', 'OFF', 'HEAD', 'ARMOR', 'SHOES', 'CAPE', 'B
 // Suffixes qui designent une lignee d'artefact plutot qu'un objet commun.
 // FEY manquait : les 225 recettes Feerique etaient classees « commun », donc
 // invisibles au filtre de lignee et affichees sans leur couleur.
-const LIGNEES_ARTEFACT = new Set(['UNDEAD', 'HELL', 'KEEPER', 'MORGANA', 'AVALON', 'CRYSTAL', 'ROYAL', 'FEY']);
+// DRAGON ajoute a la migration du 2026-09-20 : l'armure en Peau de Dragon est
+// une lignee complete de 15 artefacts (tete, poitrine, pieds x T4-T8) que
+// l'ancienne source ne voyait qu'a moitie, et qui aurait eu le meme sort.
+const LIGNEES_ARTEFACT = new Set(['UNDEAD', 'HELL', 'KEEPER', 'MORGANA', 'AVALON', 'CRYSTAL', 'ROYAL', 'FEY', 'DRAGON']);
 
 // Les 3 lignes d'armure du jeu, telles qu'elles apparaissent dans l'id.
 const LIGNES = { PLATE: 'plaque', LEATHER: 'cuir', CLOTH: 'tissu' };
@@ -292,82 +391,22 @@ function idDeNom(nom) {
   return null;   // ambigu : on prefere ne rien importer plutot que le mauvais objet
 }
 
-// La station n'est pas dans le wiki. On la deduit de ce que les recettes deja
-// connues utilisent pour la meme sous-categorie : aucune supposition, juste une
-// generalisation de ce que les dumps disent deja.
-const stationParSousCat = {};
-for (const { recette } of cibles) {
-  const it = wikiParId[recette.id.split('@')[0]];
-  if (it && it.shop_subcategory) stationParSousCat[it.shop_subcategory] = recette.station;
-}
+// ---------------------------------------------------------------------------
+//  L IMPORT DEPUIS LE WIKI A ETE SUPPRIME (migration du 2026-09-20)
+//
+//  Il existait parce que les dumps Jaccak dataient de juin 2026 et ignoraient
+//  toute la ligne Royale et une partie des artefacts Crystal, que le wiki
+//  d aout connaissait. La librairie lit desormais les fichiers du jeu,
+//  republies tous les 3 a 5 jours : elle est la source la plus fraiche des
+//  deux et ce complement n a plus d objet.
+//
+//  Avec lui disparaissent la deduction de station par sous-categorie et la
+//  resolution des materiaux par nom anglais, qui etaient deux approximations.
+//  idDeNom() ci-dessus reste utilise par le recyclage des artefacts, ou la
+//  jointure par nom anglais demeure la seule possible (materials.json ne
+//  publie aucun identifiant machine).
+// ---------------------------------------------------------------------------
 
-const dejaConnu = new Set(Object.keys(includedRecipes));
-const importes = [];
-const rejets = { nomAmbigu: [], materiauIrresolu: [], sansFiche: [], horsPerimetre: 0 };
-
-for (const rw of wikiRecettes) {
-  const base = idDeNom(rw.item);
-  if (!base) { rejets.nomAmbigu.push(rw.item); continue; }
-  const ench = rw.enchantement || 0;
-  const id = ench > 0 ? `${base}@${ench}` : base;
-  if (dejaConnu.has(id)) continue;
-
-  const it = wikiParId[base];
-  if (!it) { rejets.sansFiche.push(rw.item); continue; }
-  // Montures et mobilier sortent du perimetre de ce calculateur.
-  if (!PAR_CATEGORIE[it.shop_category] && !SOUS_CATEGORIE[it.shop_subcategory]) {
-    rejets.horsPerimetre++; continue;
-  }
-  const bonus = categorieBonus(id);
-  if (!bonus) { rejets.sansFiche.push(rw.item); continue; }
-
-  const ing = [];
-  let manque = null;
-  for (const m of (rw.ingredients || [])) {
-    const mid = idDeNom(m.materiau);
-    if (!mid) { manque = m.materiau; break; }
-    const mt = parseInt(mid.slice(1), 10) || 0;
-    const me = (mid.match(/@(\d)/) || [, 0])[1];
-    ing.push({ id: mid, tier: mt, enchantment: +me, quantity: m.quantite });
-  }
-  if (manque) { rejets.materiauIrresolu.push(rw.item + ' : ' + manque); continue; }
-  if (!ing.length) continue;
-
-  const slot = { Head: 'tete', Chest: 'poitrine', Shoes: 'pieds', Cape: 'cape', Bag: 'sac' };
-  const categorie = it.shop_category === 'gathering' ? 'recolte'
-    : it.shop_category === 'weapons' ? 'arme'
-    : it.shop_category === 'offhands' ? 'arme_secondaire'
-    : slot[it.equipment_slot] || 'arme';
-  const ligne = (it.shop_subcategory || '').startsWith('plate_') ? 'plaque'
-    : (it.shop_subcategory || '').startsWith('leather_') ? 'cuir'
-    : (it.shop_subcategory || '').startsWith('cloth_') ? 'tissu' : null;
-  const suffixe = base.split('@')[0].split('_').pop();
-
-  const rec = {
-    id,
-    station: stationParSousCat[it.shop_subcategory] || 'warriors_forge',
-    tier: it.tier || parseInt(base.slice(1), 10) || 0,
-    enchantment: ench,
-    quantity: 1,
-    // La valeur d'objet du wiki redonne exactement la nutrition des dumps
-    // (relation verifiee sur 1 191 objets) : nutrition = item_value x 0,1125 / 100.
-    nutrition: (it.item_value || 0) * 0.001125 * Math.pow(2, ench),
-    excludeFromRRR: ing.filter(i => i.id.includes('ARTEFACT')).map(i => i.id),
-    ingredients: ing,
-    categorie,
-    famille: it.shop_subcategory,
-    lignee: LIGNEES_ARTEFACT.has(suffixe) ? suffixe : 'commun',
-    bonusCategorie: bonus,
-    source: 'wiki',
-  };
-  if (ligne) rec.ligne = ligne;
-
-  includedRecipes[id] = rec;
-  dejaConnu.add(id);
-  referencedItems.add(id);
-  for (const i of ing) referencedItems.add(i.id);
-  importes.push(id);
-}
 
 // ---------------------------------------------------------------------------
 //  Fonderie d'artefacts : runeQty unites de runeId -> 1 artefact au choix.
@@ -393,32 +432,15 @@ for (const id of Object.keys(artefacts)) {
 //  Un id enchante (T6_METALBAR_LEVEL2@2) a sa propre entree ; sinon on retombe
 //  sur l'id de base.
 // ---------------------------------------------------------------------------
-// Repli sur le wiki pour les objets que les dumps de juin ne connaissent pas
-// encore : ce sont precisement ceux qu'on vient d'importer.
-const nomsWikiParId = {};
-for (const x of wikiNoms) if (x.unique_name) nomsWikiParId[x.unique_name] = x;
-
-// Les dumps Jaccak contiennent 166 caracteres de remplacement U+FFFD, sequelles
-// d'un decodage rate en amont (« ma<?>tre » pour « maitre »). Le wiki, lui, est
-// propre. Quand le nom des dumps est abime, on prend celui du wiki.
-const abime = s => typeof s === 'string' && s.includes('�');
-
+// La reparation d'encodage a disparu avec la migration. L'ancienne source
+// contenait 166 caracteres de remplacement U+FFFD (« ma<?>tre » pour
+// « maitre ») qu'il fallait aller corriger dans le wiki. Les dumps du jeu sont
+// en UTF-8 propre : verifie, zero caractere abime sur les 6 049 objets.
 const outNames = {};
-let missingNames = 0, reparesEncodage = 0;
+let missingNames = 0;
 for (const id of referencedItems) {
-  const n = names[id] || names[id.split('@')[0]];
-  const w = nomsWikiParId[id] || nomsWikiParId[id.split('@')[0]];
-  if (n) {
-    let fr = n['FR-FR'] || n['EN-US'] || id;
-    const en = n['EN-US'] || id;
-    if (abime(fr)) {
-      if (w && w.nom_fr && !abime(w.nom_fr)) { fr = w.nom_fr; reparesEncodage++; }
-      else { fr = en; reparesEncodage++; }
-    }
-    outNames[id] = { fr, en };
-    continue;
-  }
-  if (w) { outNames[id] = { fr: w.nom_fr || w.nom_en || id, en: w.nom_en || id }; continue; }
+  const n = noms[id] || noms[id.split('@')[0]];
+  if (n) { outNames[id] = { fr: n.fr, en: n.en }; continue; }
   outNames[id] = { fr: id, en: id };
   missingNames++;
 }
@@ -702,6 +724,14 @@ for (const t of [4, 5, 6, 7, 8]) {
   for (const l of ['MORGANA', 'HELL', 'KEEPER', 'AVALON']) {
     ABSENTS_ATTENDUS.add(`T${t}_ARTEFACT_2H_SHAPESHIFTER_${l}`);
   }
+  // Armure en Peau de Dragon, apparue avec la migration vers les dumps du jeu.
+  // Le wiki d'aout 2026 n'en connait aucun : ses 15 pieces sont absentes de
+  // noms_items.json, donc la jointure par nom anglais ne peut pas aboutir.
+  // materials.json en mentionne 5 sous « Dragon », sans identifiant machine.
+  // A retirer d'ici quand une extraction plus recente du wiki les aura.
+  for (const e of ['HEAD', 'ARMOR', 'SHOES']) {
+    ABSENTS_ATTENDUS.add(`T${t}_ARTEFACT_${e}_LEATHER_DRAGON`);
+  }
 }
 const totalArtefacts = Object.keys(artefactsDetail).length;
 const absents = Object.keys(artefactsDetail).filter(id => !recyclageParId[id]);
@@ -744,13 +774,15 @@ console.log(`Artefacts : ${totalArtefacts} au total — ${nbRecyclables} recycla
 //  de marge, elle est decisive pour comparer les debouches.
 // ---------------------------------------------------------------------------
 const FRAIS_ORDRE = 0.025;
+// base/meta.json nomme ses champs en francais.
+const eco = meta.economie;
 const economy = {
-  ordrePremium: meta.economy.taxPremium,
-  ordreFree: meta.economy.taxFree,
-  instantPremium: +(meta.economy.taxPremium - FRAIS_ORDRE).toFixed(4),
-  instantFree: +(meta.economy.taxFree - FRAIS_ORDRE).toFixed(4),
+  ordrePremium: eco.taxePremium,
+  ordreFree: eco.taxeSansPremium,
+  instantPremium: +(eco.taxePremium - FRAIS_ORDRE).toFixed(4),
+  instantFree: +(eco.taxeSansPremium - FRAIS_ORDRE).toFixed(4),
   fraisOrdre: FRAIS_ORDRE,
-  retourBase: meta.economy.defaultReturnRate,
+  retourBase: eco.tauxRetourBase,
 };
 
 // ---------------------------------------------------------------------------
@@ -785,7 +817,7 @@ for (const r of recipes) {
 }
 
 console.log('--- Donnees generees ---');
-console.log('Recettes affichables     :', affichables, '(' + nbCibles + ' des dumps + ' + importes.length + ' du wiki)');
+console.log('Recettes affichables     :', affichables, '(toutes issues des dumps du jeu)');
 for (const [k, v] of Object.entries(parCategorie).sort((a, b) => b[1] - a[1])) {
   console.log('   ' + (k + '                ').slice(0, 16), v);
 }
@@ -793,7 +825,6 @@ console.log('Sous-recettes (chaine)   :', recipes.length - affichables);
 console.log('Recettes totales         :', recipes.length);
 console.log('Artefacts a la fonderie  :', Object.keys(artefacts).length);
 console.log('Items nommes             :', Object.keys(outNames).length, '(' + missingNames + ' sans nom officiel)');
-if (reparesEncodage) console.log('   dont noms repares       :', reparesEncodage, '(caracteres abimes dans les dumps)');
 console.log('Fiches techniques        :', Object.keys(ip).length, 'objets avec Item Power,',
   Object.keys(stats).length, 'avec statistiques ->',
   (fs.statSync(OUT_FICHES).size / 1024).toFixed(0), 'Ko');
@@ -803,12 +834,6 @@ for (const [v, n] of Object.entries(parVille).sort((a, b) => b[1] - a[1])) {
   console.log('   ' + (v + '              ').slice(0, 15), n, 'recettes');
 }
 
-console.log('--- Import wiki ---');
-console.log('   importees              :', importes.length);
-console.log('   hors perimetre         :', rejets.horsPerimetre, '(montures, mobilier)');
-if (rejets.nomAmbigu.length) console.log('   nom non resolu         :', new Set(rejets.nomAmbigu).size, 'ex:', rejets.nomAmbigu[0]);
-if (rejets.sansFiche.length) console.log('   sans fiche objet       :', new Set(rejets.sansFiche).size, 'ex:', rejets.sansFiche[0]);
-if (rejets.materiauIrresolu.length) console.log('   materiau non resolu    :', new Set(rejets.materiauIrresolu).size, 'ex:', rejets.materiauIrresolu[0]);
 
 console.log('Taille du fichier        :', (fs.statSync(OUT).size / 1024 / 1024).toFixed(2), 'Mo ->', OUT);
 
