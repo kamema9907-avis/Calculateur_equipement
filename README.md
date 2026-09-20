@@ -645,13 +645,28 @@ node scripts/build-data.js
 
 | Source | Ce qu'elle apporte |
 |---|---|
-| `../Albion_librairie_des_recettes_du_jeu` (dumps, juin 2026) | Les recettes, leurs identifiants machine et leur nutrition |
-| `../Albion_Analyse_site_web` (wiki, août 2026) | La catégorie de bonus de ville, et les objets absents des dumps |
+| `../Albion_librairie_des_recettes_du_jeu/base` (dumps du jeu) | Les recettes, les catégories de boutique, les noms, la nutrition de fabrication, les exclusions du retour de ressources, la fonderie |
+| `../Albion_Analyse_site_web` (wiki, août 2026) | Uniquement ce que le jeu ne publie pas : Item Power par qualité, statistiques de combat, recyclage des artefacts, ville bonifiante |
 
-Les dumps de juin ne connaissaient ni la ligne **Royale** ni une partie des artefacts
-**Crystal** : 575 recettes que le générateur va chercher dans le wiki et fusionne. Le
-wiki ne publiant aucun identifiant machine, la résolution passe par `noms_items.json`.
-Ces recettes portent `source: "wiki"` pour rester traçables.
+**Migration du 2026-09-20.** La librairie reposait sur `Jaccak/AlbionRecipes`, dépôt
+mort depuis novembre 2024, et le wiki comblait ses trous. Elle lit désormais
+`ao-data/ao-bin-dumps`, republié tous les 3 à 5 jours : elle est devenue la source la
+plus fraîche des deux. L'import de recettes depuis le wiki a donc disparu, avec la
+déduction de station par sous-catégorie et la réparation des noms français abîmés.
+
+Sur les 6 792 recettes communes, la migration n'en a fait disparaître aucune et n'a
+changé ni les catégories ni les villes bonifiantes. 975 sont apparues, dont l'armure
+en **Peau de Dragon**, une lignée complète de 15 artefacts que ni les anciens dumps ni
+le wiki ne connaissaient. Trois erreurs corrigées au passage : le marteau de siège
+demande 8 planches et non 6, la ligne Royale en T5 demande 4 ou 8 jetons selon la
+pièce et non 2 partout, et la nutrition des 507 recettes jadis importées du wiki était
+calculée avec un doublement par niveau d'enchantement, hypothèse fausse dès qu'un
+artefact entre dans la recette (rapports réels 1 / 1,21 / 1,63 / 2,48 / 4,17).
+
+Deux comportements sont délibérément préservés : les cinq bâtiments de raffinage sont
+recollés sous `refinery`, parce que `js/moteur.js` teste cette valeur pour choisir le
+taux de retour, et les outils restent classés `Tools` malgré leur `shopcategory` du
+jeu, qui les rangerait avec l'équipement de récolte.
 
 Le rapport du générateur annonce la répartition par ville bonifiante, ce qui permet de
 voir d'un coup d'œil qu'aucune ville n'est anormalement chargée.

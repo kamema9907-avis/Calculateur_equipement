@@ -751,7 +751,7 @@ if (reapparus.length) {
 const OUT_ARTEFACTS = path.resolve(__dirname, '..', 'data', 'artefacts.json');
 fs.writeFileSync(OUT_ARTEFACTS, JSON.stringify({
   generatedAt: new Date().toISOString(),
-  source: 'barème relevé en jeu (2026) + dump fonderie (artefact_foundry.json)',
+  source: 'barème relevé en jeu (2026) + fonderie dérivée de base/ (ao-bin-dumps)',
   unitesRecyclage: UNITES_RECYCLAGE,
   fonte: { branche: FONTE_BRANCHE, toutes: FONTE_TOUTES },
   bareme: BAREME,
