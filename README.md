@@ -645,8 +645,8 @@ node scripts/build-data.js
 
 | Source | Ce qu'elle apporte |
 |---|---|
-| `../Albion_librairie_des_recettes_du_jeu/base` (dumps du jeu) | Les recettes, les catégories de boutique, les noms, la nutrition de fabrication, les exclusions du retour de ressources, la fonderie |
-| `../Albion_Analyse_site_web` (wiki, août 2026) | Uniquement ce que le jeu ne publie pas : Item Power par qualité, statistiques de combat, recyclage des artefacts, ville bonifiante |
+| `../../donnees/base` (dumps du jeu) | Les recettes, les catégories de boutique, les noms, la nutrition de fabrication, les exclusions du retour de ressources, la fonderie |
+| `../../reference` (wiki, août 2026) | Uniquement ce que le jeu ne publie pas : Item Power par qualité, statistiques de combat, recyclage des artefacts, ville bonifiante |
 
 **Migration du 2026-09-20.** La librairie reposait sur `Jaccak/AlbionRecipes`, dépôt
 mort depuis novembre 2024, et le wiki comblait ses trous. Elle lit désormais

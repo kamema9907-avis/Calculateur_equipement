@@ -5,11 +5,11 @@
  *
  * DEUX sources, aux roles desormais bien separes :
  *
- *   1. ../Albion_librairie_des_recettes_du_jeu/base  (dumps du jeu, a jour)
+ *   1. ../../donnees/base  (dumps du jeu, a jour)
  *      Les recettes, les categories de boutique, les noms, la nutrition de
  *      fabrication, les exclusions du retour de ressources, la fonderie.
  *
- *   2. ../Albion_Analyse_site_web/data               (wiki officiel, aout 2026)
+ *   2. ../../reference/data               (wiki officiel, aout 2026)
  *      Uniquement ce que le jeu ne publie pas : l'Item Power par qualite,
  *      les statistiques de combat, le recyclage des artefacts et la ville
  *      bonifiante de chaque categorie.
@@ -40,8 +40,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const LIB = path.resolve(__dirname, '..', '..', 'Albion_librairie_des_recettes_du_jeu', 'base');
-const WIKI = path.resolve(__dirname, '..', '..', 'Albion_Analyse_site_web', 'data');
+const LIB = path.resolve(__dirname, '..', '..', '..', 'donnees', 'base');
+const WIKI = path.resolve(__dirname, '..', '..', '..', 'reference', 'data');
 const OUT = path.resolve(__dirname, '..', 'data', 'equipment-data.json');
 
 const load = rel => JSON.parse(fs.readFileSync(path.join(LIB, rel), 'utf8'));

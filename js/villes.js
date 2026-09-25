@@ -52,7 +52,7 @@ export const BONUS_RAFFINAGE_DEFAUT = {
 //  la verite — c'etait l'erreur des premieres versions de ce fichier.
 //
 //  Les 30 categories ci-dessous viennent du wiki officiel
-//  (Albion_Analyse_site_web/data/city_bonuses.json, extraction d'aout 2026), et
+//  (Albion/reference/data/city_bonuses.json, extraction d'aout 2026), et
 //  recoupent les quatre que Vigile avait confirmees en jeu : gants de guerre,
 //  equipement de recolte et outils a Caerleon, sacs a Brecilien.
 //
